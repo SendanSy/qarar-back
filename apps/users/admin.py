@@ -16,7 +16,7 @@ class UserInterestInline(TabularInline):
     """Inline for user interests"""
     model = UserInterest
     extra = 0
-    autocomplete_fields = ['category']
+    fields = ['name']
 
 
 @admin.register(User)

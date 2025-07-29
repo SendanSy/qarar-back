@@ -14,7 +14,7 @@ class SubsidiaryInline(TabularInline):
     """Inline for organization subsidiaries"""
     model = Subsidiary
     extra = 0
-    fields = ('name', 'name_ar', 'email', 'phone', 'is_active')
+    fields = ('name', 'name_ar', 'code', 'is_active')
     readonly_fields = ('created_at',)
 
 
@@ -25,20 +25,18 @@ class OrganizationAdmin(ModelAdmin):
     list_display = [
         'name_display',
         'code',
-        'organization_type_display',
         'email',
         'phone',
-        'subsidiaries_count',
+        'country',
         'is_active_display',
         'is_verified_display',
         'created_at',
     ]
     
     list_filter = [
-        'organization_type',
         'is_active',
         'is_verified',
-        'country',
+        ('country', RelatedDropdownFilter),
         'created_at',
     ]
     
@@ -49,8 +47,7 @@ class OrganizationAdmin(ModelAdmin):
         (_('Basic Information'), {
             'fields': (
                 ('name', 'name_ar'),
-                'slug',
-                ('code', 'organization_type'),
+                'code',
                 ('description', 'description_ar'),
             )
         }),
@@ -58,16 +55,14 @@ class OrganizationAdmin(ModelAdmin):
             'fields': (
                 ('email', 'phone'),
                 'website',
-                'address',
-                'country',
             )
         }),
-        (_('Media'), {
+        (_('Location'), {
             'fields': (
-                'logo',
-                'cover_image',
-            ),
-            'classes': ('collapse',),
+                'country',
+                'state',
+                'city',
+            )
         }),
         (_('Status'), {
             'fields': (
@@ -84,9 +79,9 @@ class OrganizationAdmin(ModelAdmin):
         }),
     )
     
-    readonly_fields = ['slug', 'created_at', 'updated_at']
-    prepopulated_fields = {'slug': ('name',)}
+    readonly_fields = ['created_at', 'updated_at']
     inlines = [SubsidiaryInline]
+    autocomplete_fields = ['country', 'state', 'city']
     
     @display(description=_('Name'))
     def name_display(self, obj):
@@ -98,32 +93,6 @@ class OrganizationAdmin(ModelAdmin):
             )
         return obj.name
     
-    @display(description=_('Type'), ordering='organization_type')
-    def organization_type_display(self, obj):
-        types = {
-            'government': {'label': _('Government'), 'color': '#dc2626'},
-            'ministry': {'label': _('Ministry'), 'color': '#2563eb'},
-            'department': {'label': _('Department'), 'color': '#7c3aed'},
-            'agency': {'label': _('Agency'), 'color': '#16a34a'},
-            'other': {'label': _('Other'), 'color': '#6b7280'},
-        }
-        type_info = types.get(obj.organization_type, {'label': obj.organization_type, 'color': '#6b7280'})
-        return format_html(
-            '<span style="background: {}; color: white; padding: 3px 8px; border-radius: 3px;">{}</span>',
-            type_info['color'],
-            type_info['label']
-        )
-    
-    @display(description=_('Subsidiaries'))
-    def subsidiaries_count(self, obj):
-        count = obj.subsidiaries.filter(is_deleted=False).count()
-        if count > 0:
-            return format_html(
-                '<span style="background: #3b82f6; color: white; padding: 3px 8px; border-radius: 3px;">{}</span>',
-                count
-            )
-        return '-'
-    
     @display(description=_('Active'), boolean=True)
     def is_active_display(self, obj):
         return obj.is_active
@@ -134,7 +103,7 @@ class OrganizationAdmin(ModelAdmin):
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.prefetch_related('subsidiaries')
+        return qs.select_related('country', 'state', 'city').prefetch_related('subsidiaries')
 
 
 @admin.register(Subsidiary)
@@ -143,41 +112,43 @@ class SubsidiaryAdmin(ModelAdmin):
     
     list_display = [
         'name_display',
-        'organization_display',
-        'email',
-        'phone',
+        'code',
+        'parent_organization',
+        'country',
         'is_active_display',
         'created_at',
     ]
     
     list_filter = [
         'is_active',
-        ('organization', RelatedDropdownFilter),
+        ('parent_organization', RelatedDropdownFilter),
+        ('country', RelatedDropdownFilter),
         'created_at',
     ]
     
     search_fields = [
         'name', 'name_ar',
-        'email', 'phone',
-        'organization__name', 'organization__name_ar'
+        'code',
+        'parent_organization__name', 'parent_organization__name_ar'
     ]
     
-    autocomplete_fields = ['organization']
-    ordering = ['organization', 'name']
+    autocomplete_fields = ['parent_organization', 'country', 'state', 'city']
+    ordering = ['parent_organization', 'name']
     
     fieldsets = (
         (_('Basic Information'), {
             'fields': (
-                'organization',
+                'parent_organization',
                 ('name', 'name_ar'),
-                'slug',
+                'code',
                 ('description', 'description_ar'),
             )
         }),
-        (_('Contact Information'), {
+        (_('Location'), {
             'fields': (
-                ('email', 'phone'),
-                'address',
+                'country',
+                'state',
+                'city',
             )
         }),
         (_('Status'), {
@@ -194,8 +165,7 @@ class SubsidiaryAdmin(ModelAdmin):
         }),
     )
     
-    readonly_fields = ['slug', 'created_at', 'updated_at']
-    prepopulated_fields = {'slug': ('name',)}
+    readonly_fields = ['created_at', 'updated_at']
     
     @display(description=_('Name'))
     def name_display(self, obj):
@@ -207,16 +177,10 @@ class SubsidiaryAdmin(ModelAdmin):
             )
         return obj.name
     
-    @display(description=_('Organization'), ordering='organization')
-    def organization_display(self, obj):
-        if obj.organization:
-            return obj.organization.name_ar or obj.organization.name
-        return '-'
-    
     @display(description=_('Active'), boolean=True)
     def is_active_display(self, obj):
         return obj.is_active
     
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.select_related('organization')
+        return qs.select_related('parent_organization', 'country', 'state', 'city')

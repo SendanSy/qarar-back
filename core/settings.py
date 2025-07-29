@@ -123,7 +123,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 # Internationalization
-LANGUAGE_CODE = 'ar'  # Arabic as default
+LANGUAGE_CODE = 'en'  # English as default
 TIME_ZONE = 'Asia/Damascus'  # Syria timezone
 USE_I18N = True
 USE_L10N = True
@@ -133,8 +133,8 @@ USE_TZ = True
 from django.utils.translation import gettext_lazy as _
 
 LANGUAGES = [
-    ('ar', _('Arabic')),
     ('en', _('English')),
+    ('ar', _('Arabic')),
 ]
 
 # Locale paths
@@ -334,8 +334,8 @@ WHITENOISE_AUTOREFRESH = DEBUG
 
 # Django Unfold Configuration
 UNFOLD = {
-    "SITE_TITLE": "منصة قرار",  # Qarar Platform in Arabic
-    "SITE_HEADER": "منصة قرار الإدارية",  # Qarar Administrative Platform
+    "SITE_TITLE": "Qarar Platform",  # Qarar Platform in English
+    "SITE_HEADER": "Qarar Administrative Platform",  # Qarar Administrative Platform
     "SITE_URL": SITE_URL,
     "SITE_ICON": {
         "light": "icon-light.svg",  # Icon for light mode
@@ -356,8 +356,6 @@ UNFOLD = {
     ],
     "SHOW_HISTORY": True,  # Show history in admin
     "SHOW_VIEW_ON_SITE": True,  # Show view on site button
-    "ENVIRONMENT": "apps.core.utils.environment_callback",  # Show environment badge
-    "DASHBOARD_CALLBACK": "apps.core.admin.dashboard_callback",  # Custom dashboard
     "LOGIN": {
         "image": "login-bg.jpg",
         "redirect_after": None,  # None means default admin index
@@ -404,7 +402,6 @@ UNFOLD = {
                         "title": _("Posts"),
                         "icon": "article",
                         "link": "/admin/content/post/",
-                        "badge": "apps.core.utils.post_count_callback",
                     },
                     {
                         "title": _("Categories"),
@@ -493,63 +490,6 @@ UNFOLD = {
             },
         ],
     },
-    "TABS": [
-        {
-            "models": ["content.post"],
-            "items": [
-                {
-                    "title": _("General"),
-                    "fields": [
-                        "title",
-                        "title_ar",
-                        "slug",
-                        "post_type",
-                        "organization",
-                        "subsidiary",
-                    ],
-                },
-                {
-                    "title": _("Content"),
-                    "fields": [
-                        "summary",
-                        "summary_ar",
-                        "content",
-                        "content_ar",
-                    ],
-                },
-                {
-                    "title": _("Classification"),
-                    "fields": [
-                        "categories",
-                        "sub_categories",
-                        "hashtags",
-                        "target_audience",
-                        "priority",
-                    ],
-                },
-                {
-                    "title": _("Publishing"),
-                    "fields": [
-                        "status",
-                        "published_at",
-                        "is_featured",
-                        "is_pinned",
-                        "created_by",
-                        "updated_by",
-                    ],
-                },
-                {
-                    "title": _("SEO"),
-                    "fields": [
-                        "meta_title",
-                        "meta_title_ar",
-                        "meta_description",
-                        "meta_description_ar",
-                        "meta_keywords",
-                        "meta_keywords_ar",
-                    ],
-                },
-            ],
-        },
-    ],
+    # Remove TABS configuration as it's causing issues
+    # Tabs will be configured directly in admin classes
 }

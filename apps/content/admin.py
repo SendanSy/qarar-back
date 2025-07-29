@@ -13,8 +13,7 @@ from unfold.contrib.filters.admin import (
 )
 from .models import (
     Post, PostType, Category, SubCategory, HashTag,
-    PostAttachment, PostCategory, PostSubCategory, PostHashTag,
-    Bookmark
+    PostAttachment, Bookmark
 )
 
 
@@ -27,28 +26,6 @@ class PostAttachmentInline(TabularInline):
     ordering = ('order',)
 
 
-class PostCategoryInline(TabularInline):
-    """Inline for post categories"""
-    model = PostCategory
-    extra = 1
-    autocomplete_fields = ['category']
-
-
-class PostSubCategoryInline(TabularInline):
-    """Inline for post subcategories"""
-    model = PostSubCategory
-    extra = 1
-    autocomplete_fields = ['subcategory']
-
-
-class PostHashTagInline(TabularInline):
-    """Inline for post hashtags"""
-    model = PostHashTag
-    extra = 0
-    autocomplete_fields = ['hashtag']
-    readonly_fields = ('created_at',)
-
-
 @admin.register(Post)
 class PostAdmin(ModelAdmin):
     """Admin configuration for Post model"""
@@ -56,20 +33,17 @@ class PostAdmin(ModelAdmin):
     # List display configuration
     list_display = [
         'title_display',
-        'post_type_display',
+        'type_display',
         'organization_display',
         'status_display',
         'view_count',
-        'is_featured_display',
         'published_at',
-        'created_by',
+        'author',
     ]
     
     list_filter = [
         'status',
-        'is_featured',
-        'is_pinned',
-        ('post_type', RelatedDropdownFilter),
+        ('type', RelatedDropdownFilter),
         ('organization', RelatedDropdownFilter),
         ('categories', RelatedDropdownFilter),
         ('published_at', RangeDateFilter),
@@ -89,7 +63,7 @@ class PostAdmin(ModelAdmin):
             'fields': (
                 ('title', 'title_ar'),
                 'slug',
-                ('post_type', 'priority'),
+                ('type', 'author'),
                 ('organization', 'subsidiary'),
             )
         }),
@@ -100,27 +74,31 @@ class PostAdmin(ModelAdmin):
             ),
             'classes': ('wide',),
         }),
+        (_('Classification'), {
+            'fields': (
+                'categories',
+                'subcategories',
+                'hashtags',
+            )
+        }),
         (_('Publishing Options'), {
             'fields': (
                 'status',
                 'published_at',
-                ('is_featured', 'is_pinned'),
-                'target_audience',
             )
         }),
         (_('SEO Settings'), {
             'fields': (
-                ('meta_title', 'meta_title_ar'),
-                ('meta_description', 'meta_description_ar'),
-                ('meta_keywords', 'meta_keywords_ar'),
+                'meta_description',
+                'meta_keywords',
             ),
             'classes': ('collapse',),
         }),
         (_('Tracking'), {
             'fields': (
                 'view_count',
-                ('created_by', 'created_at'),
-                ('updated_by', 'updated_at'),
+                'created_at',
+                'updated_at',
             ),
             'classes': ('collapse',),
         }),
@@ -128,22 +106,21 @@ class PostAdmin(ModelAdmin):
     
     readonly_fields = [
         'slug', 'view_count', 'created_at', 'updated_at',
-        'created_by', 'updated_by'
     ]
     
     # Inlines
     inlines = [
-        PostCategoryInline,
-        PostSubCategoryInline,
-        PostHashTagInline,
         PostAttachmentInline,
     ]
     
     # Autocomplete fields
-    autocomplete_fields = ['organization', 'subsidiary', 'post_type']
+    autocomplete_fields = ['organization', 'subsidiary', 'type', 'author']
+    
+    # Filter horizontal for many-to-many
+    filter_horizontal = ['categories', 'subcategories', 'hashtags']
     
     # Actions
-    actions = ['make_published', 'make_draft', 'feature_posts', 'unfeature_posts']
+    actions = ['make_published', 'make_draft']
     
     # Prepopulated fields
     prepopulated_fields = {'slug': ('title',)}
@@ -165,15 +142,10 @@ class PostAdmin(ModelAdmin):
             )
         return obj.title
     
-    @display(description=_('Type'), ordering='post_type')
-    def post_type_display(self, obj):
-        if obj.post_type:
-            color = obj.post_type.color or '#666'
-            return format_html(
-                '<span style="background: {}; color: white; padding: 3px 8px; border-radius: 3px;">{}</span>',
-                color,
-                obj.post_type.name_ar or obj.post_type.name
-            )
+    @display(description=_('Type'), ordering='type')
+    def type_display(self, obj):
+        if obj.type:
+            return obj.type.name_ar or obj.type.name
         return '-'
     
     @display(description=_('Organization'), ordering='organization')
@@ -200,10 +172,6 @@ class PostAdmin(ModelAdmin):
             labels.get(obj.status, obj.status)
         )
     
-    @display(description=_('Featured'), boolean=True)
-    def is_featured_display(self, obj):
-        return obj.is_featured
-    
     # Actions
     @action(description=_('Publish selected posts'))
     def make_published(self, request, queryset):
@@ -215,61 +183,31 @@ class PostAdmin(ModelAdmin):
         updated = queryset.update(status='draft')
         self.message_user(request, _(f'{updated} posts were made draft.'))
     
-    @action(description=_('Feature selected posts'))
-    def feature_posts(self, request, queryset):
-        updated = queryset.update(is_featured=True)
-        self.message_user(request, _(f'{updated} posts were featured.'))
-    
-    @action(description=_('Unfeature selected posts'))
-    def unfeature_posts(self, request, queryset):
-        updated = queryset.update(is_featured=False)
-        self.message_user(request, _(f'{updated} posts were unfeatured.'))
-    
-    def save_model(self, request, obj, form, change):
-        if not change:
-            obj.created_by = request.user
-        obj.updated_by = request.user
-        super().save_model(request, obj, form, change)
-    
     def get_queryset(self, request):
         qs = super().get_queryset(request)
         return qs.select_related(
-            'post_type', 'organization', 'subsidiary', 'created_by', 'updated_by'
-        ).prefetch_related('categories', 'sub_categories', 'hashtags')
+            'type', 'organization', 'subsidiary', 'author'
+        ).prefetch_related('categories', 'subcategories', 'hashtags')
 
 
 @admin.register(PostType)
 class PostTypeAdmin(ModelAdmin):
     """Admin configuration for PostType model"""
     
-    list_display = ['name_display', 'color_display', 'icon', 'post_count', 'order', 'is_active']
+    list_display = ['name_display', 'is_active']
     list_filter = ['is_active']
     search_fields = ['name', 'name_ar', 'description', 'description_ar']
-    ordering = ['order', 'name']
+    ordering = ['name']
     
     fieldsets = (
         (_('Basic Information'), {
             'fields': (
                 ('name', 'name_ar'),
-                'slug',
                 ('description', 'description_ar'),
-            )
-        }),
-        (_('Appearance'), {
-            'fields': (
-                ('color', 'icon'),
-                'order',
                 'is_active',
             )
         }),
-        (_('Statistics'), {
-            'fields': ('post_count',),
-            'classes': ('collapse',),
-        }),
     )
-    
-    readonly_fields = ['slug', 'post_count']
-    prepopulated_fields = {'slug': ('name',)}
     
     @display(description=_('Name'))
     def name_display(self, obj):
@@ -280,16 +218,6 @@ class PostTypeAdmin(ModelAdmin):
                 obj.name or ''
             )
         return obj.name
-    
-    @display(description=_('Color'))
-    def color_display(self, obj):
-        if obj.color:
-            return format_html(
-                '<span style="background: {}; width: 20px; height: 20px; display: inline-block; border-radius: 3px;"></span> {}',
-                obj.color,
-                obj.color
-            )
-        return '-'
 
 
 @admin.register(Category)
@@ -447,7 +375,7 @@ class HashTagAdmin(ModelAdmin):
 class PostAttachmentAdmin(ModelAdmin):
     """Admin configuration for PostAttachment model"""
     
-    list_display = ['title_display', 'post_display', 'file_type', 'formatted_size', 'is_public', 'download_count', 'created_at']
+    list_display = ['title_display', 'post_display', 'file_type', 'size', 'is_public', 'download_count', 'created_at']
     list_filter = ['file_type', 'is_public', ('created_at', RangeDateFilter)]
     search_fields = ['title', 'description', 'post__title', 'post__title_ar']
     autocomplete_fields = ['post']
