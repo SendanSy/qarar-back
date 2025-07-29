@@ -96,9 +96,22 @@ SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
 SESSION_CACHE_ALIAS = 'default'
 
 # Logging for production
-LOGGING['handlers']['file']['filename'] = '/var/log/qarar/django.log'
+# Add file handler for production
+LOGGING['handlers']['file'] = {
+    'level': 'INFO',
+    'class': 'logging.FileHandler',
+    'filename': '/var/log/qarar/django.log',
+    'formatter': 'verbose',
+}
+
+# Update loggers to use file handler in production
+LOGGING['loggers']['django']['handlers'] = ['file', 'console']
+LOGGING['loggers']['apps']['handlers'] = ['file', 'console']
+
+# Set appropriate log levels for production
 LOGGING['handlers']['console']['level'] = 'WARNING'
 LOGGING['loggers']['django']['level'] = 'WARNING'
+LOGGING['loggers']['apps']['level'] = 'INFO'
 
 # Security middleware for production
 MIDDLEWARE = [

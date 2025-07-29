@@ -78,6 +78,16 @@ MEDIA_ROOT = BASE_DIR / 'media'
 LOGGING['handlers']['console']['level'] = 'DEBUG'
 LOGGING['loggers']['django']['level'] = 'DEBUG'
 
+# Remove file handler for development
+if 'file' in LOGGING['handlers']:
+    del LOGGING['handlers']['file']
+    
+# Update root logger to only use console
+LOGGING['root']['handlers'] = ['console']
+
+# Update django logger to only use console
+LOGGING['loggers']['django']['handlers'] = ['console']
+
 # Cache settings for development
 CACHES = {
     'default': {
