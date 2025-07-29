@@ -28,6 +28,11 @@ class Command(BaseCommand):
             action='store_true',
             help='Do not cleanup existing data before seeding',
         )
+        parser.add_argument(
+            '--cleanup-only',
+            action='store_true',
+            help='Only cleanup the database without seeding new data',
+        )
 
     def cleanup_database(self):
         """Delete all existing data from the database"""
@@ -73,6 +78,11 @@ class Command(BaseCommand):
     @transaction.atomic
     def handle(self, *args, **kwargs):
         try:
+            # If cleanup-only flag is provided, just cleanup and return
+            if kwargs.get('cleanup_only'):
+                self.cleanup_database()
+                return
+                
             self.stdout.write('Starting database seeding...')
             
             # Cleanup unless --no-cleanup flag is provided
