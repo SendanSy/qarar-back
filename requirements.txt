@@ -23,6 +23,7 @@ flake8>=6.1.0,<7.0.0
 black>=23.7.0,<24.0.0
 factory-boy>=3.3.0,<4.0.0  # For test factories
 faker>=19.0.0,<20.0.0  # For fake data generation
+model-bakery>=1.17.0,<2.0.0  # For creating test objects
 
 # Production
 gunicorn>=21.2.0,<22.0.0
