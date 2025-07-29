@@ -105,7 +105,7 @@ class PostAdmin(ModelAdmin):
     )
     
     readonly_fields = [
-        'slug', 'view_count', 'created_at', 'updated_at',
+        'view_count', 'created_at', 'updated_at',
     ]
     
     # Inlines

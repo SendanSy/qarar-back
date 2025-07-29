@@ -337,14 +337,8 @@ UNFOLD = {
     "SITE_TITLE": "Qarar Platform",  # Qarar Platform in English
     "SITE_HEADER": "Qarar Administrative Platform",  # Qarar Administrative Platform
     "SITE_URL": SITE_URL,
-    "SITE_ICON": {
-        "light": "icon-light.svg",  # Icon for light mode
-        "dark": "icon-dark.svg",  # Icon for dark mode
-    },
-    "SITE_LOGO": {
-        "light": "logo-light.svg",  # Logo for light mode
-        "dark": "logo-dark.svg",  # Logo for dark mode
-    },
+    "SITE_ICON": None,  # No icon
+    "SITE_LOGO": None,  # No logo
     "SITE_SYMBOL": "newspaper",  # Material symbol
     "SITE_FAVICONS": [
         {
@@ -391,7 +385,7 @@ UNFOLD = {
     },
     "SIDEBAR": {
         "show_search": True,
-        "show_all_applications": True,
+        "show_all_applications": False,
         "navigation": [
             {
                 "title": _("Content Management"),
@@ -460,14 +454,19 @@ UNFOLD = {
                 "collapsible": True,
                 "items": [
                     {
-                        "title": _("Provinces"),
-                        "icon": "location_city",
-                        "link": "/admin/geographics/province/",
+                        "title": _("Countries"),
+                        "icon": "public",
+                        "link": "/admin/geographics/country/",
                     },
                     {
-                        "title": _("Districts"),
+                        "title": _("States"),
+                        "icon": "location_city",
+                        "link": "/admin/geographics/state/",
+                    },
+                    {
+                        "title": _("Cities"),
                         "icon": "location_on",
-                        "link": "/admin/geographics/district/",
+                        "link": "/admin/geographics/city/",
                     },
                 ],
             },
@@ -492,4 +491,5 @@ UNFOLD = {
     },
     # Remove TABS configuration as it's causing issues
     # Tabs will be configured directly in admin classes
+    "DASHBOARD_CALLBACK": "apps.core.admin.dashboard_callback",
 }

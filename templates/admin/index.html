@@ -1,0 +1,300 @@
+{% extends 'admin/base.html' %}
+{% load i18n %}
+
+{% block breadcrumbs %}{% endblock %}
+
+{% block title %}{% if subtitle %}{{ subtitle }} | {% endif %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block branding %}
+    {% include "unfold/helpers/site_branding.html" %}
+{% endblock %}
+
+{% block content %}
+    <div class="flex flex-col lg:flex-row lg:gap-8">
+        <div class="grow">
+            <!-- Dashboard Statistics -->
+            {% if summary_cards %}
+            <div class="mb-6">
+                <h2 class="font-semibold mb-3 text-base-900 text-lg dark:text-base-100">{% trans "Dashboard Overview" %}</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    {% for card in summary_cards %}
+                    <div class="bg-white border border-base-400/10 rounded-default p-4 shadow-xs dark:bg-base-900 dark:border-base-800">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="text-sm text-base-500 dark:text-base-400">{{ card.title }}</h3>
+                            {% if card.icon %}
+                            <span class="material-symbols-outlined text-base-400 text-sm dark:text-base-500">{{ card.icon }}</span>
+                            {% endif %}
+                        </div>
+                        <div class="text-xl font-semibold text-base-900 dark:text-base-100">{{ card.value }}</div>
+                        {% if card.subtitle %}
+                        <p class="text-xs text-base-500 dark:text-base-400 mt-1">{{ card.subtitle }}</p>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Charts Row 1 -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-6">
+                {% if post_status_data %}
+                <div class="bg-base-50 rounded-default p-3 dark:bg-base-800">
+                    <div class="bg-white border border-base-400/10 rounded-default p-4 shadow-xs dark:bg-base-900 dark:border-base-800">
+                        <h3 class="font-semibold text-base-900 mb-3 dark:text-base-100">{% trans "Post Status" %}</h3>
+                        <div style="height: 200px;">
+                            <canvas id="postStatusChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if geographic_stats %}
+                <div class="bg-base-50 rounded-default p-3 dark:bg-base-800">
+                    <div class="bg-white border border-base-400/10 rounded-default p-4 shadow-xs dark:bg-base-900 dark:border-base-800">
+                        <h3 class="font-semibold text-base-900 mb-3 dark:text-base-100">{% trans "Geographic Coverage" %}</h3>
+                        <div class="space-y-2">
+                            <div class="flex justify-between text-sm">
+                                <span class="text-base-500 dark:text-base-400">{% trans "Countries" %}</span>
+                                <span class="font-medium text-base-900 dark:text-base-100">{{ geographic_stats.countries }}</span>
+                            </div>
+                            <div class="flex justify-between text-sm">
+                                <span class="text-base-500 dark:text-base-400">{% trans "States" %}</span>
+                                <span class="font-medium text-base-900 dark:text-base-100">{{ geographic_stats.states }}</span>
+                            </div>
+                            <div class="flex justify-between text-sm">
+                                <span class="text-base-500 dark:text-base-400">{% trans "Cities" %}</span>
+                                <span class="font-medium text-base-900 dark:text-base-100">{{ geographic_stats.cities }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if content_stats %}
+                <div class="bg-base-50 rounded-default p-3 dark:bg-base-800">
+                    <div class="bg-white border border-base-400/10 rounded-default p-4 shadow-xs dark:bg-base-900 dark:border-base-800">
+                        <h3 class="font-semibold text-base-900 mb-3 dark:text-base-100">{% trans "Content Statistics" %}</h3>
+                        <div class="space-y-2">
+                            <div class="flex justify-between text-sm">
+                                <span class="text-base-500 dark:text-base-400">{% trans "Categories" %}</span>
+                                <span class="font-medium text-base-900 dark:text-base-100">{{ content_stats.categories }}</span>
+                            </div>
+                            <div class="flex justify-between text-sm">
+                                <span class="text-base-500 dark:text-base-400">{% trans "Hashtags" %}</span>
+                                <span class="font-medium text-base-900 dark:text-base-100">{{ content_stats.hashtags }}</span>
+                            </div>
+                            <div class="flex justify-between text-sm">
+                                <span class="text-base-500 dark:text-base-400">{% trans "Trending" %}</span>
+                                <span class="font-medium text-orange-600">{{ content_stats.trending }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Trend Charts -->
+            {% if posts_trend_chart or users_trend_chart %}
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-6">
+                {% if posts_trend_chart %}
+                <div class="bg-base-50 rounded-default p-3 dark:bg-base-800">
+                    <div class="bg-white border border-base-400/10 rounded-default p-4 shadow-xs dark:bg-base-900 dark:border-base-800">
+                        <h3 class="font-semibold text-base-900 mb-3 dark:text-base-100">{% trans "Posts Trend (30 Days)" %}</h3>
+                        <div style="height: 150px;">
+                            <canvas id="postsTrendChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if users_trend_chart %}
+                <div class="bg-base-50 rounded-default p-3 dark:bg-base-800">
+                    <div class="bg-white border border-base-400/10 rounded-default p-4 shadow-xs dark:bg-base-900 dark:border-base-800">
+                        <h3 class="font-semibold text-base-900 mb-3 dark:text-base-100">{% trans "User Registrations (30 Days)" %}</h3>
+                        <div style="height: 150px;">
+                            <canvas id="usersTrendChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <!-- Default App List -->
+            <h2 class="font-semibold mb-3 text-base-900 text-lg dark:text-base-100">{% trans "Applications" %}</h2>
+            {% include "unfold/helpers/app_list_default.html" %}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="lg:w-80 mt-6 lg:mt-0">
+            <!-- Recent Posts -->
+            {% if recent_posts %}
+            <div class="bg-base-50 rounded-default p-3 mb-6 dark:bg-base-800">
+                <div class="bg-white border border-base-400/10 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800">
+                    <div class="p-4 border-b border-base-100 dark:border-base-800">
+                        <h3 class="font-semibold text-base-900 dark:text-base-100">{% trans "Recent Posts" %}</h3>
+                    </div>
+                    <div class="p-2">
+                        {% for post in recent_posts|slice:":5" %}
+                        <div class="px-2 py-2 {% if not forloop.last %}border-b border-base-100 dark:border-base-800{% endif %}">
+                            <p class="text-sm font-medium text-base-900 dark:text-base-100 truncate">{{ post.title }}</p>
+                            <p class="text-xs text-base-500 dark:text-base-400">
+                                {{ post.author.username }} • {{ post.created_at|date:"SHORT_DATE_FORMAT" }}
+                            </p>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Top Organizations -->
+            {% if top_organizations %}
+            <div class="bg-base-50 rounded-default p-3 dark:bg-base-800">
+                <div class="bg-white border border-base-400/10 rounded-default shadow-xs dark:bg-base-900 dark:border-base-800">
+                    <div class="p-4 border-b border-base-100 dark:border-base-800">
+                        <h3 class="font-semibold text-base-900 dark:text-base-100">{% trans "Top Organizations" %}</h3>
+                    </div>
+                    <div class="p-2">
+                        {% for org in top_organizations %}
+                        <div class="px-2 py-2 flex justify-between items-center {% if not forloop.last %}border-b border-base-100 dark:border-base-800{% endif %}">
+                            <span class="text-sm text-base-900 dark:text-base-100 truncate">{{ org.name }}</span>
+                            <span class="text-sm font-medium text-primary-600">{{ org.total_posts }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Chart.js Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+        Chart.defaults.font.size = 12;
+        Chart.defaults.color = '#6b7280';
+
+        // Post Status Chart
+        {% if post_status_data %}
+        const postStatusCtx = document.getElementById('postStatusChart').getContext('2d');
+        new Chart(postStatusCtx, {
+            type: 'doughnut',
+            data: {
+                labels: {{ post_status_data.labels|safe }},
+                datasets: [{
+                    data: {{ post_status_data.data|safe }},
+                    backgroundColor: {{ post_status_data.colors|safe }},
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            padding: 10,
+                            font: {
+                                size: 11
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        {% endif %}
+
+        // Posts Trend Chart
+        {% if posts_trend_chart %}
+        const postsTrendCtx = document.getElementById('postsTrendChart').getContext('2d');
+        new Chart(postsTrendCtx, {
+            type: 'line',
+            data: {
+                labels: {{ posts_trend_chart.labels|safe }},
+                datasets: [{
+                    label: '{% trans "Posts" %}',
+                    data: {{ posts_trend_chart.data|safe }},
+                    borderColor: 'rgb(99, 102, 241)',
+                    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    x: {
+                        display: false
+                    },
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0
+                        }
+                    }
+                }
+            }
+        });
+        {% endif %}
+
+        // Users Trend Chart
+        {% if users_trend_chart %}
+        const usersTrendCtx = document.getElementById('usersTrendChart').getContext('2d');
+        new Chart(usersTrendCtx, {
+            type: 'line',
+            data: {
+                labels: {{ users_trend_chart.labels|safe }},
+                datasets: [{
+                    label: '{% trans "New Users" %}',
+                    data: {{ users_trend_chart.data|safe }},
+                    borderColor: 'rgb(34, 197, 94)',
+                    backgroundColor: 'rgba(34, 197, 94, 0.1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    x: {
+                        display: false
+                    },
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            precision: 0
+                        }
+                    }
+                }
+            }
+        });
+        {% endif %}
+    </script>
+{% endblock %}
