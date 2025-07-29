@@ -5,7 +5,7 @@ from django.contrib.contenttypes.fields import GenericRelation
 from django.utils import timezone
 from apps.core.models import BaseModel
 from apps.core.managers import PostManager, CategoryManager, PostAttachmentManager
-from apps.producers.models import Organization, Subsidiary
+from apps.producers.models import Organization, Subsidiary, Department
 from .classification import Category, SubCategory, HashTag
 
 
@@ -99,6 +99,14 @@ class Post(BaseModel):
         blank=True,
         related_name='posts',
         verbose_name=_('Subsidiary')
+    )
+    department = models.ForeignKey(
+        Department,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='posts',
+        verbose_name=_('Department')
     )
     
     # Classifications

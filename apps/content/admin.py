@@ -45,6 +45,8 @@ class PostAdmin(ModelAdmin):
         'status',
         ('type', RelatedDropdownFilter),
         ('organization', RelatedDropdownFilter),
+        ('subsidiary', RelatedDropdownFilter),
+        ('department', RelatedDropdownFilter),
         ('categories', RelatedDropdownFilter),
         ('published_at', RangeDateFilter),
         ('created_at', RangeDateFilter),
@@ -64,7 +66,7 @@ class PostAdmin(ModelAdmin):
                 ('title', 'title_ar'),
                 'slug',
                 ('type', 'author'),
-                ('organization', 'subsidiary'),
+                ('organization', 'subsidiary', 'department'),
             )
         }),
         (_('Content'), {
@@ -114,7 +116,7 @@ class PostAdmin(ModelAdmin):
     ]
     
     # Autocomplete fields
-    autocomplete_fields = ['organization', 'subsidiary', 'type', 'author']
+    autocomplete_fields = ['organization', 'subsidiary', 'department', 'type', 'author']
     
     # Filter horizontal for many-to-many
     filter_horizontal = ['categories', 'subcategories', 'hashtags']

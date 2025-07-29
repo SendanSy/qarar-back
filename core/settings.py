@@ -451,6 +451,11 @@ UNFOLD = {
                         "icon": "account_tree",
                         "link": "/admin/producers/subsidiary/",
                     },
+                    {
+                        "title": _("Departments"),
+                        "icon": "groups",
+                        "link": "/admin/producers/department/",
+                    },
                 ],
             },
             {

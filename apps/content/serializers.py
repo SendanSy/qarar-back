@@ -4,7 +4,7 @@ from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
 
 from apps.users.serializers import UserMinimalSerializer
-from apps.producers.models import Organization, Subsidiary
+from apps.producers.models import Organization, Subsidiary, Department
 from .models.classification import Category, SubCategory, HashTag
 from .models.bookmark import Bookmark
 from .models.post import Post, PostType, PostAttachment
@@ -148,6 +148,13 @@ class PostSerializer(serializers.ModelSerializer):
     )
     subsidiary_name = serializers.CharField(source='subsidiary.name', read_only=True)
     subsidiary_name_ar = serializers.CharField(source='subsidiary.name_ar', read_only=True)
+    department = serializers.PrimaryKeyRelatedField(
+        queryset=Department.objects.filter(is_active=True),
+        required=False,
+        allow_null=True
+    )
+    department_name = serializers.CharField(source='department.name', read_only=True)
+    department_name_ar = serializers.CharField(source='department.name_ar', read_only=True)
     categories = CategorySerializer(many=True, read_only=True)
     category_ids = serializers.PrimaryKeyRelatedField(
         source='categories',
@@ -181,6 +188,7 @@ class PostSerializer(serializers.ModelSerializer):
             'id', 'title', 'title_ar', 'content', 'content_ar', 'summary', 'summary_ar',
             'author', 'type', 'type_id', 'organization', 'organization_name',
             'organization_name_ar', 'subsidiary', 'subsidiary_name', 'subsidiary_name_ar',
+            'department', 'department_name', 'department_name_ar',
             'categories', 'category_ids', 'subcategories', 'subcategory_ids',
             'hashtags', 'hashtag_names', 'attachments', 'attachment_count',
             'status', 'created_at', 'updated_at', 'published_at', 'view_count',

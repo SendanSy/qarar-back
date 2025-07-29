@@ -181,4 +181,107 @@ class Subsidiary(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.name} ({self.parent_organization.name})" 
+        return f"{self.name} ({self.parent_organization.name})"
+
+
+class Department(models.Model):
+    """
+    Model for departments within subsidiaries
+    """
+    name = models.CharField(
+        max_length=255,
+        verbose_name=_('Name')
+    )
+    name_ar = models.CharField(
+        max_length=255,
+        verbose_name=_('Arabic Name')
+    )
+    code = models.CharField(
+        max_length=50,
+        unique=True,
+        verbose_name=_('Department Code')
+    )
+    subsidiary = models.ForeignKey(
+        Subsidiary,
+        on_delete=models.CASCADE,
+        related_name='departments',
+        verbose_name=_('Subsidiary')
+    )
+    description = models.TextField(
+        blank=True,
+        verbose_name=_('Description')
+    )
+    description_ar = models.TextField(
+        blank=True,
+        verbose_name=_('Arabic Description')
+    )
+    
+    # Department head information
+    head_name = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name=_('Department Head Name')
+    )
+    head_email = models.EmailField(
+        blank=True,
+        verbose_name=_('Department Head Email')
+    )
+    head_phone = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name=_('Department Head Phone')
+    )
+    
+    # Additional department info
+    employee_count = models.PositiveIntegerField(
+        default=0,
+        verbose_name=_('Number of Employees')
+    )
+    department_type = models.CharField(
+        max_length=50,
+        choices=[
+            ('admin', _('Administrative')),
+            ('media', _('Media')),
+            ('technical', _('Technical')),
+            ('financial', _('Financial')),
+            ('legal', _('Legal')),
+            ('hr', _('Human Resources')),
+            ('it', _('Information Technology')),
+            ('other', _('Other'))
+        ],
+        default='other',
+        verbose_name=_('Department Type')
+    )
+    
+    # Status and metadata
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name=_('Active Status')
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        verbose_name=_('Created At')
+    )
+    updated_at = models.DateTimeField(
+        auto_now=True,
+        verbose_name=_('Updated At')
+    )
+
+    class Meta:
+        verbose_name = _('Department')
+        verbose_name_plural = _('Departments')
+        ordering = ['subsidiary', 'name']
+        indexes = [
+            models.Index(fields=['code']),
+            models.Index(fields=['is_active']),
+            models.Index(fields=['department_type']),
+        ]
+        unique_together = [['subsidiary', 'code']]
+
+    def __str__(self):
+        return f"{self.name} - {self.subsidiary.name}"
+    
+    @property
+    def organization(self):
+        """Get the parent organization through subsidiary"""
+        return self.subsidiary.parent_organization 
