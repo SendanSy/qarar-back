@@ -44,6 +44,7 @@ urlpatterns = [
     # API endpoints
     path('api/v1/auth/', include('apps.users.urls')),
     path('api/v1/content/', include('apps.content.urls')),
+    path('api/v1/producers/', include('apps.producers.urls')),
     
     # Swagger documentation - standard implementation
     re_path(r'^swagger(?P<format>\.json|\.yaml)$', schema_view.without_ui(cache_timeout=0), name='schema-json'),

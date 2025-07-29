@@ -36,6 +36,12 @@ class PostFilter(filters.FilterSet):
     # Custom search filter (note: DRF's SearchFilter handles 'search' parameter)
     content_search = filters.CharFilter(method='filter_search')
     
+    # Organization filters
+    organization_code = filters.CharFilter(field_name='organization__code')
+    subsidiary_code = filters.CharFilter(field_name='subsidiary__code')
+    department = filters.NumberFilter(field_name='department__id')
+    department_code = filters.CharFilter(field_name='department__code')
+    
     class Meta:
         model = Post
         fields = {
@@ -44,6 +50,7 @@ class PostFilter(filters.FilterSet):
             'type': ['exact'],
             'organization': ['exact'],
             'subsidiary': ['exact'],
+            'department': ['exact'],
         }
     
     def filter_search(self, queryset, name, value):
