@@ -19,7 +19,6 @@ from .serializers import (
     PostSerializer, CategorySerializer, HashTagSerializer,
     PostTypeSerializer, BookmarkSerializer
 )
-from .bulk_operations import BulkOperationService
 from .filters import PostFilter, CategoryFilter
 
 
@@ -253,38 +252,6 @@ class PostViewSet(viewsets.ModelViewSet):
         cache.set(cache_key, response_data, 900)  # 15 minutes
         return Response(response_data)
     
-    @action(detail=False, methods=['post'])
-    def bulk_operations(self, request):
-        """Handle bulk operations on posts."""
-        operation = request.data.get('operation')
-        post_ids = request.data.get('post_ids', [])
-        
-        if not operation or not post_ids:
-            return Response({'error': 'Operation and post_ids are required'}, status=status.HTTP_400_BAD_REQUEST)
-        
-        try:
-            service = BulkOperationService(request.user)
-            
-            if operation == 'publish':
-                posts = service.bulk_publish_posts(post_ids)
-                return Response({
-                    'operation': operation,
-                    'count': len(posts),
-                    'post_ids': [str(p.id) for p in posts]
-                })
-            
-            elif operation == 'delete':
-                count = service.bulk_delete_posts(post_ids)
-                return Response({
-                    'operation': operation,
-                    'count': count
-                })
-            
-            else:
-                return Response({'error': f'Unsupported operation: {operation}'}, status=status.HTTP_400_BAD_REQUEST)
-                
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
