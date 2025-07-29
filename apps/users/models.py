@@ -78,6 +78,7 @@ class User(AbstractUser):
     class Meta:
         verbose_name = _('User')
         verbose_name_plural = _('Users')
+        ordering = ['-date_joined']
     
     def __str__(self):
         return self.username
@@ -101,37 +102,8 @@ class UserInterest(models.Model):
         unique_together = ('user', 'name')
         verbose_name = _('User Interest')
         verbose_name_plural = _('User Interests')
+        ordering = ['name']
     
     def __str__(self):
         return f"{self.user.username} - {self.name}"
 
-
-class UserFollowing(models.Model):
-    """
-    Model representing a follow relationship between users
-    """
-    user = models.ForeignKey(
-        User,
-        related_name='following',
-        on_delete=models.CASCADE,
-        verbose_name=_('User')
-    )
-    following_user = models.ForeignKey(
-        User,
-        related_name='followers',
-        on_delete=models.CASCADE,
-        verbose_name=_('Following')
-    )
-    created_at = models.DateTimeField(
-        auto_now_add=True,
-        verbose_name=_('Created At')
-    )
-    
-    class Meta:
-        verbose_name = _('User Following')
-        verbose_name_plural = _('User Followings')
-        unique_together = ('user', 'following_user')
-        ordering = ['-created_at']
-    
-    def __str__(self):
-        return f"{self.user.username} follows {self.following_user.username}"

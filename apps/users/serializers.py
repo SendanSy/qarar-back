@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from .models import UserInterest, UserFollowing
+from .models import UserInterest
 
 User = get_user_model()
 
@@ -37,33 +37,6 @@ class UserInterestSerializer(serializers.ModelSerializer):
         fields = ('id', 'name')
 
 
-class UserFollowingSerializer(serializers.ModelSerializer):
-    """
-    Serializer for user following relationships
-    """
-    class Meta:
-        model = UserFollowing
-        fields = ('id', 'following_user', 'created_at')
-
-
-class UserFollowerSerializer(serializers.ModelSerializer):
-    """
-    Serializer for user followers
-    """
-    user = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = UserFollowing
-        fields = ('id', 'user', 'created_at')
-    
-    def get_user(self, obj):
-        return {
-            'id': obj.user.id,
-            'username': obj.user.username,
-            'profile_picture': obj.user.profile_picture.url if obj.user.profile_picture else None,
-        }
-
-
 class UserMinimalSerializer(serializers.ModelSerializer):
     """
     Minimal user serializer with basic info (for lists, mentions, etc.)
@@ -78,8 +51,6 @@ class UserSerializer(serializers.ModelSerializer):
     """
     Standard user serializer for general use
     """
-    following_count = serializers.SerializerMethodField()
-    followers_count = serializers.SerializerMethodField()
     interests = UserInterestSerializer(many=True, read_only=True)
     
     class Meta:
@@ -88,35 +59,17 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'first_name', 'last_name', 
             'bio', 'profile_picture', 'cover_photo', 'website', 'location',
             'user_type', 'twitter', 'facebook', 'instagram', 'linkedin',
-            'is_verified', 'date_joined', 'following_count', 'followers_count',
-            'interests',
+            'is_verified', 'date_joined', 'interests',
         )
         read_only_fields = ('email', 'date_joined', 'is_verified')
-    
-    def get_following_count(self, obj):
-        return obj.following.count()
-    
-    def get_followers_count(self, obj):
-        return obj.followers.count()
 
 
 class UserDetailSerializer(UserSerializer):
     """
     Detailed user serializer with all fields
     """
-    is_following = serializers.SerializerMethodField()
-    
     class Meta(UserSerializer.Meta):
-        fields = UserSerializer.Meta.fields + ('is_following',)
-    
-    def get_is_following(self, obj):
-        request = self.context.get('request')
-        if request and request.user.is_authenticated:
-            return UserFollowing.objects.filter(
-                user=request.user, 
-                following_user=obj
-            ).exists()
-        return False
+        fields = UserSerializer.Meta.fields
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):

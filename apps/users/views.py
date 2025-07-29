@@ -15,13 +15,11 @@ from .serializers import (
     UserDetailSerializer, 
     UserRegistrationSerializer, 
     UserInterestSerializer,
-    UserFollowingSerializer,
-    UserFollowerSerializer,
     CustomTokenObtainPairSerializer,
     PasswordChangeSerializer,
     UserMinimalSerializer
 )
-from .models import UserInterest, UserFollowing
+from .models import UserInterest
 
 User = get_user_model()
 
@@ -119,10 +117,6 @@ class UserViewSet(viewsets.ModelViewSet):
         if user_type:
             queryset = queryset.filter(user_type=user_type)
             
-        # Sort by followers count
-        sort_by = self.request.query_params.get('sort_by', None)
-        if sort_by == 'followers':
-            queryset = queryset.annotate(followers_count=Count('followers')).order_by('-followers_count')
             
         return queryset
     
@@ -145,48 +139,6 @@ class UserViewSet(viewsets.ModelViewSet):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    @action(detail=True, methods=['post'])
-    def follow(self, request, pk=None):
-        """
-        Follow a user
-        """
-        target_user = self.get_object()
-        if target_user == request.user:
-            return Response(
-                {"detail": "You cannot follow yourself."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-        # Check if already following
-        if UserFollowing.objects.filter(user=request.user, following_user=target_user).exists():
-            return Response(
-                {"detail": "You are already following this user."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-        # Create following relationship
-        UserFollowing.objects.create(user=request.user, following_user=target_user)
-        return Response({"detail": "You are now following this user."})
-    
-    @action(detail=True, methods=['post'])
-    def unfollow(self, request, pk=None):
-        """
-        Unfollow a user
-        """
-        target_user = self.get_object()
-        
-        # Check if following exists
-        following = UserFollowing.objects.filter(user=request.user, following_user=target_user).first()
-        if not following:
-            return Response(
-                {"detail": "You are not following this user."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-            
-        # Delete following relationship
-        following.delete()
-        return Response({"detail": "You have unfollowed this user."})
     
     @action(detail=False, methods=['post'])
     def change_password(self, request):
@@ -217,33 +169,6 @@ class UserViewSet(viewsets.ModelViewSet):
         
         return Response({"detail": "Password changed successfully."})
     
-    @action(detail=True, methods=['get'])
-    def following(self, request, pk=None):
-        """
-        Get list of users that this user is following
-        """
-        user = self.get_object()
-        followings = UserFollowing.objects.filter(user=user)
-        page = self.paginate_queryset(followings)
-        if page is not None:
-            serializer = UserFollowingSerializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-        serializer = UserFollowingSerializer(followings, many=True)
-        return Response(serializer.data)
-    
-    @action(detail=True, methods=['get'])
-    def followers(self, request, pk=None):
-        """
-        Get list of users following this user
-        """
-        user = self.get_object()
-        followers = UserFollowing.objects.filter(following_user=user)
-        page = self.paginate_queryset(followers)
-        if page is not None:
-            serializer = UserFollowerSerializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-        serializer = UserFollowerSerializer(followers, many=True)
-        return Response(serializer.data)
 
 
 class UserInterestViewSet(viewsets.ModelViewSet):

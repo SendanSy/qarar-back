@@ -9,7 +9,7 @@ from django.utils.translation import gettext_lazy as _
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import display
 from unfold.contrib.filters.admin import RangeDateFilter
-from .models import User, UserInterest, UserFollowing
+from .models import User, UserInterest
 
 
 class UserInterestInline(TabularInline):
@@ -141,32 +141,6 @@ class UserAdmin(BaseUserAdmin, ModelAdmin):
         qs = super().get_queryset(request)
         return qs.prefetch_related('groups', 'user_permissions')
 
-
-@admin.register(UserFollowing)
-class UserFollowingAdmin(ModelAdmin):
-    """Admin configuration for UserFollowing model"""
-    
-    list_display = ['user', 'following_user', 'created_at']
-    list_filter = [('created_at', RangeDateFilter)]
-    search_fields = ['user__username', 'user__email', 'following_user__username', 'following_user__email']
-    autocomplete_fields = ['user', 'following_user']
-    date_hierarchy = 'created_at'
-    ordering = ['-created_at']
-    
-    fieldsets = (
-        (_('Following Relationship'), {
-            'fields': (
-                'user',
-                'following_user',
-            )
-        }),
-        (_('Timestamps'), {
-            'fields': ('created_at',),
-            'classes': ('collapse',),
-        }),
-    )
-    
-    readonly_fields = ['created_at']
 
 
 # Unregister and re-register Group with Unfold
