@@ -315,14 +315,18 @@ if USE_S3:
     # S3 Media files settings
     DEFAULT_FILE_STORAGE = 'core.storage_backends.MediaStorage'
     
-    # Media files URL
-    MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/media/'
+    # Media files URL - will be overridden by signed URLs
+    MEDIA_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com/media/'
     
     # S3 File Overwrite
     AWS_S3_FILE_OVERWRITE = False
     
     # S3 Addressing Style
     AWS_S3_ADDRESSING_STYLE = 'virtual'
+    
+    # Signed URL settings
+    AWS_QUERYSTRING_AUTH = True  # Enable signed URLs
+    AWS_QUERYSTRING_EXPIRE = 3600  # 1 hour expiration
     
     # Optional: CloudFront Distribution
     AWS_CLOUDFRONT_DISTRIBUTION_ID = os.environ.get('AWS_CLOUDFRONT_DISTRIBUTION_ID', '')
