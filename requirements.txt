@@ -4,9 +4,10 @@ djangorestframework>=3.14.0,<4.0.0
 djangorestframework-simplejwt>=5.3.0,<6.0.0
 django-cors-headers>=4.1.0,<5.0.0
 django-filter>=23.2,<24.0
-django-taggit>=4.0.0,<5.0.0
-django-ipware>=5.0.0,<6.0.0
-django-admin-interface>=0.30.0,<0.31.0
+django-unfold>=0.24.0,<1.0.0
+django-import-export>=3.3.0,<4.0.0
+django-guardian>=2.4.0,<3.0.0
+django-simple-history>=3.4.0,<4.0.0
 
 # Swagger/API documentation
 drf-yasg>=1.21.7,<2.0.0
@@ -26,17 +27,12 @@ faker>=19.0.0,<20.0.0  # For fake data generation
 # Production
 gunicorn>=21.2.0,<22.0.0
 psycopg2-binary>=2.9.7,<3.0.0  # PostgreSQL adapter
-whitenoise>=6.5.0,<7.0.0  # Static files serving
 redis>=5.0.0,<6.0.0  # For caching and message broker
 django-redis>=5.3.0,<6.0.0  # Redis cache backend
-dj-database-url>=2.1.0,<3.0.0  # Database URL configuration
-
-# Performance & Monitoring
-psutil>=5.9.0,<6.0.0  # System monitoring
-django-debug-toolbar>=4.2.0,<5.0.0  # Development debugging
+whitenoise>=6.5.0,<7.0.0  # Static files serving
+django-storages[boto3]>=1.14.0,<2.0.0  # AWS S3 storage backend
 
 # Security
-django-ratelimit>=4.1.0,<5.0.0
 python-dotenv>=1.0.0,<2.0.0
 
 # Search (PostgreSQL full-text search)

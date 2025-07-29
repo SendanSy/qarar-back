@@ -23,6 +23,15 @@ ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(','
 
 # Application definition
 INSTALLED_APPS = [
+    # Unfold admin (must be before django.contrib.admin)
+    'unfold',
+    'unfold.contrib.filters',
+    'unfold.contrib.forms',
+    'unfold.contrib.import_export',
+    'unfold.contrib.guardian',
+    'unfold.contrib.simple_history',
+    
+    # Django apps
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -31,13 +40,10 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     
     # Third party apps
-    'admin_interface',
-    'colorfield',
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
     'django_filters',
-    'taggit',
     'drf_yasg',
     'django_seed',
     
@@ -51,7 +57,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.locale.LocaleMiddleware',  # Add for language switching
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -115,11 +123,24 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 # Internationalization
-LANGUAGE_CODE = 'en-us'
-TIME_ZONE = 'UTC'
+LANGUAGE_CODE = 'ar'  # Arabic as default
+TIME_ZONE = 'Asia/Damascus'  # Syria timezone
 USE_I18N = True
 USE_L10N = True
 USE_TZ = True
+
+# Languages configuration
+from django.utils.translation import gettext_lazy as _
+
+LANGUAGES = [
+    ('ar', _('Arabic')),
+    ('en', _('English')),
+]
+
+# Locale paths
+LOCALE_PATHS = [
+    BASE_DIR / 'locale',
+]
 
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = '/static/'
@@ -259,9 +280,6 @@ if os.environ.get('REDIS_URL'):
         'default': {
             'BACKEND': 'django.core.cache.backends.redis.RedisCache',
             'LOCATION': os.environ.get('REDIS_URL'),
-            'OPTIONS': {
-                'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            },
             'KEY_PREFIX': 'qarar',
             'TIMEOUT': 300,
         }
@@ -271,3 +289,267 @@ if os.environ.get('REDIS_URL'):
 
 # Silenced system checks
 SILENCED_SYSTEM_CHECKS = ['security.W019']
+
+# AWS S3 Configuration (for production)
+USE_S3 = os.environ.get('USE_S3', 'False').lower() == 'true'
+
+if USE_S3:
+    # AWS Credentials
+    AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME')
+    AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME', 'us-east-1')
+    
+    # AWS S3 Settings
+    AWS_S3_CUSTOM_DOMAIN = os.environ.get('AWS_S3_CUSTOM_DOMAIN', f'{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com')
+    AWS_S3_OBJECT_PARAMETERS = {
+        'CacheControl': 'max-age=86400',  # 1 day
+    }
+    AWS_DEFAULT_ACL = None  # Use bucket policy instead of ACLs
+    AWS_S3_VERIFY = True
+    
+    # S3 Static files settings
+    STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+    
+    # S3 Media files settings
+    DEFAULT_FILE_STORAGE = 'core.storage_backends.MediaStorage'
+    
+    # Media files URL
+    MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/media/'
+    
+    # S3 File Overwrite
+    AWS_S3_FILE_OVERWRITE = False
+    
+    # S3 Addressing Style
+    AWS_S3_ADDRESSING_STYLE = 'virtual'
+    
+    # Optional: CloudFront Distribution
+    AWS_CLOUDFRONT_DISTRIBUTION_ID = os.environ.get('AWS_CLOUDFRONT_DISTRIBUTION_ID', '')
+    AWS_CLOUDFRONT_KEY_ID = os.environ.get('AWS_CLOUDFRONT_KEY_ID', '')
+    AWS_CLOUDFRONT_KEY = os.environ.get('AWS_CLOUDFRONT_KEY', '')
+
+# WhiteNoise configuration for static files
+WHITENOISE_SKIP_COMPRESS_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'zip', 'gz', 'tgz', 'bz2', 'tbz', 'xz', 'br']
+WHITENOISE_AUTOREFRESH = DEBUG
+
+# Django Unfold Configuration
+UNFOLD = {
+    "SITE_TITLE": "منصة قرار",  # Qarar Platform in Arabic
+    "SITE_HEADER": "منصة قرار الإدارية",  # Qarar Administrative Platform
+    "SITE_URL": SITE_URL,
+    "SITE_ICON": {
+        "light": "icon-light.svg",  # Icon for light mode
+        "dark": "icon-dark.svg",  # Icon for dark mode
+    },
+    "SITE_LOGO": {
+        "light": "logo-light.svg",  # Logo for light mode
+        "dark": "logo-dark.svg",  # Logo for dark mode
+    },
+    "SITE_SYMBOL": "newspaper",  # Material symbol
+    "SITE_FAVICONS": [
+        {
+            "rel": "icon",
+            "sizes": "32x32",
+            "type": "image/svg+xml",
+            "href": "favicon.svg",
+        },
+    ],
+    "SHOW_HISTORY": True,  # Show history in admin
+    "SHOW_VIEW_ON_SITE": True,  # Show view on site button
+    "ENVIRONMENT": "apps.core.utils.environment_callback",  # Show environment badge
+    "DASHBOARD_CALLBACK": "apps.core.admin.dashboard_callback",  # Custom dashboard
+    "LOGIN": {
+        "image": "login-bg.jpg",
+        "redirect_after": None,  # None means default admin index
+    },
+    "STYLES": [
+        "css/admin-rtl.css",  # RTL support for Arabic
+    ],
+    "SCRIPTS": [
+        "js/admin-custom.js",  # Custom admin scripts
+    ],
+    "COLORS": {
+        "primary": {
+            "50": "250 245 255",
+            "100": "243 232 255",
+            "200": "233 213 255",
+            "300": "216 180 254",
+            "400": "192 132 252",
+            "500": "168 85 247",
+            "600": "147 51 234",
+            "700": "126 34 206",
+            "800": "107 33 168",
+            "900": "88 28 135",
+            "950": "59 7 100",
+        },
+    },
+    "EXTENSIONS": {
+        "modeltranslation": {
+            "flags": {
+                "en": "🇬🇧",
+                "ar": "🇸🇦",
+            },
+        },
+    },
+    "SIDEBAR": {
+        "show_search": True,
+        "show_all_applications": True,
+        "navigation": [
+            {
+                "title": _("Content Management"),
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": _("Posts"),
+                        "icon": "article",
+                        "link": "/admin/content/post/",
+                        "badge": "apps.core.utils.post_count_callback",
+                    },
+                    {
+                        "title": _("Categories"),
+                        "icon": "category",
+                        "link": "/admin/content/category/",
+                    },
+                    {
+                        "title": _("Sub Categories"),
+                        "icon": "subdirectory_arrow_right",
+                        "link": "/admin/content/subcategory/",
+                    },
+                    {
+                        "title": _("Post Types"),
+                        "icon": "style",
+                        "link": "/admin/content/posttype/",
+                    },
+                    {
+                        "title": _("Hashtags"),
+                        "icon": "tag",
+                        "link": "/admin/content/hashtag/",
+                    },
+                ],
+            },
+            {
+                "title": _("Media & Attachments"),
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": _("Attachments"),
+                        "icon": "attach_file",
+                        "link": "/admin/content/postattachment/",
+                    },
+                ],
+            },
+            {
+                "title": _("Organizations"),
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": _("Organizations"),
+                        "icon": "corporate_fare",
+                        "link": "/admin/producers/organization/",
+                    },
+                    {
+                        "title": _("Subsidiaries"),
+                        "icon": "account_tree",
+                        "link": "/admin/producers/subsidiary/",
+                    },
+                ],
+            },
+            {
+                "title": _("Geographic Data"),
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": _("Provinces"),
+                        "icon": "location_city",
+                        "link": "/admin/geographics/province/",
+                    },
+                    {
+                        "title": _("Districts"),
+                        "icon": "location_on",
+                        "link": "/admin/geographics/district/",
+                    },
+                ],
+            },
+            {
+                "title": _("User Management"),
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": _("Users"),
+                        "icon": "person",
+                        "link": "/admin/users/user/",
+                    },
+                    {
+                        "title": _("Groups"),
+                        "icon": "group",
+                        "link": "/admin/auth/group/",
+                    },
+                ],
+            },
+        ],
+    },
+    "TABS": [
+        {
+            "models": ["content.post"],
+            "items": [
+                {
+                    "title": _("General"),
+                    "fields": [
+                        "title",
+                        "title_ar",
+                        "slug",
+                        "post_type",
+                        "organization",
+                        "subsidiary",
+                    ],
+                },
+                {
+                    "title": _("Content"),
+                    "fields": [
+                        "summary",
+                        "summary_ar",
+                        "content",
+                        "content_ar",
+                    ],
+                },
+                {
+                    "title": _("Classification"),
+                    "fields": [
+                        "categories",
+                        "sub_categories",
+                        "hashtags",
+                        "target_audience",
+                        "priority",
+                    ],
+                },
+                {
+                    "title": _("Publishing"),
+                    "fields": [
+                        "status",
+                        "published_at",
+                        "is_featured",
+                        "is_pinned",
+                        "created_by",
+                        "updated_by",
+                    ],
+                },
+                {
+                    "title": _("SEO"),
+                    "fields": [
+                        "meta_title",
+                        "meta_title_ar",
+                        "meta_description",
+                        "meta_description_ar",
+                        "meta_keywords",
+                        "meta_keywords_ar",
+                    ],
+                },
+            ],
+        },
+    ],
+}

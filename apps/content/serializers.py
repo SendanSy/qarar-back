@@ -94,6 +94,15 @@ class PostAttachmentSerializer(serializers.ModelSerializer):
     def get_file_url(self, obj):
         if not obj.file:
             return None
+        
+        # If using S3, the file.url already contains the full URL
+        if hasattr(obj.file, 'url'):
+            file_url = obj.file.url
+            # Check if it's already a full URL (S3 or CloudFront)
+            if file_url.startswith('http'):
+                return file_url
+        
+        # For local storage, build absolute URI
         request = self.context.get('request')
         if request:
             return request.build_absolute_uri(obj.file.url)

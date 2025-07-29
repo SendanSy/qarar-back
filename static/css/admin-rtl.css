@@ -1,0 +1,166 @@
+/* RTL Support for Django Unfold Admin */
+
+/* Global RTL adjustments */
+[dir="rtl"] {
+    direction: rtl;
+    text-align: right;
+}
+
+/* Admin header adjustments */
+[dir="rtl"] .unfold-header {
+    direction: rtl;
+}
+
+[dir="rtl"] .unfold-sidebar {
+    right: 0;
+    left: auto;
+}
+
+[dir="rtl"] .unfold-main {
+    margin-right: 280px;
+    margin-left: 0;
+}
+
+/* Form field adjustments */
+[dir="rtl"] .form-row {
+    direction: rtl;
+}
+
+[dir="rtl"] label {
+    text-align: right;
+}
+
+[dir="rtl"] .help {
+    text-align: right;
+}
+
+/* Table adjustments */
+[dir="rtl"] table {
+    direction: rtl;
+}
+
+[dir="rtl"] th,
+[dir="rtl"] td {
+    text-align: right;
+}
+
+/* Button and action adjustments */
+[dir="rtl"] .button,
+[dir="rtl"] .submit-row {
+    float: left;
+}
+
+[dir="rtl"] .submit-row input {
+    margin-left: 0;
+    margin-right: 8px;
+}
+
+/* Inline form adjustments */
+[dir="rtl"] .inline-group {
+    direction: rtl;
+}
+
+[dir="rtl"] .inline-related {
+    text-align: right;
+}
+
+/* Breadcrumb adjustments */
+[dir="rtl"] .breadcrumbs {
+    text-align: right;
+}
+
+[dir="rtl"] .breadcrumbs a {
+    float: right;
+}
+
+/* Search adjustments */
+[dir="rtl"] #changelist-search {
+    text-align: right;
+}
+
+[dir="rtl"] #searchbar {
+    direction: rtl;
+}
+
+/* Filter adjustments */
+[dir="rtl"] #changelist-filter {
+    right: auto;
+    left: 0;
+}
+
+/* Icon adjustments */
+[dir="rtl"] .material-icons {
+    margin-right: 0;
+    margin-left: 8px;
+}
+
+/* Arabic specific styling */
+body[lang="ar"] {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Arabic", "Arial", sans-serif;
+}
+
+/* Fix for Arabic text in select elements */
+[dir="rtl"] select {
+    direction: rtl;
+    text-align: right;
+}
+
+/* Pagination adjustments */
+[dir="rtl"] .paginator {
+    text-align: left;
+}
+
+[dir="rtl"] .paginator a,
+[dir="rtl"] .paginator span {
+    float: left;
+    margin-left: 0;
+    margin-right: 8px;
+}
+
+/* Checkbox and radio adjustments */
+[dir="rtl"] input[type="checkbox"],
+[dir="rtl"] input[type="radio"] {
+    margin-right: 0;
+    margin-left: 8px;
+}
+
+/* Related widget adjustments */
+[dir="rtl"] .related-widget-wrapper {
+    float: right;
+}
+
+/* Calendar widget adjustments */
+[dir="rtl"] .calendarbox {
+    text-align: right;
+}
+
+/* Messages adjustments */
+[dir="rtl"] .messagelist {
+    text-align: right;
+}
+
+/* Dashboard card adjustments */
+[dir="rtl"] .dashboard-card {
+    direction: rtl;
+    text-align: right;
+}
+
+/* Fix floating elements */
+[dir="rtl"] .float-right {
+    float: left !important;
+}
+
+[dir="rtl"] .float-left {
+    float: right !important;
+}
+
+/* Fix margins and paddings */
+[dir="rtl"] .ml-auto {
+    margin-left: 0 !important;
+    margin-right: auto !important;
+}
+
+[dir="rtl"] .mr-auto {
+    margin-right: 0 !important;
+    margin-left: auto !important;
+}

@@ -17,6 +17,7 @@ from django.contrib import admin
 from django.urls import path, include, re_path
 from django.conf import settings
 from django.conf.urls.static import static
+from django.conf.urls.i18n import i18n_patterns
 from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
@@ -37,8 +38,8 @@ schema_view = get_schema_view(
 
 # API URL patterns
 urlpatterns = [
-    # Admin
-    path('admin/', admin.site.urls),
+    # Language switching
+    path('i18n/', include('django.conf.urls.i18n')),
     
     # API endpoints
     path('api/v1/auth/', include('apps.users.urls')),
@@ -50,13 +51,12 @@ urlpatterns = [
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
 ]
 
+# Admin URLs with i18n support
+urlpatterns += i18n_patterns(
+    path('admin/', admin.site.urls),
+    prefix_default_language=False,
+)
+
 # Serve media files in development
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-    
-    # Add debug toolbar URLs
-    if 'debug_toolbar' in settings.INSTALLED_APPS:
-        import debug_toolbar
-        urlpatterns = [
-            path('__debug__/', include(debug_toolbar.urls)),
-        ] + urlpatterns
