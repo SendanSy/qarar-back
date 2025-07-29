@@ -7,9 +7,6 @@ from rest_framework import status
 from django.core.exceptions import ValidationError
 from django.http import Http404
 from django.utils.translation import gettext_lazy as _
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 class QararException(Exception):
@@ -130,11 +127,6 @@ def custom_exception_handler(exc, context):
     
     # If we have a response, customize it
     if response is not None:
-        # Log the error
-        logger.error(f"API Error: {exc}", exc_info=True, extra={
-            'request': context.get('request'),
-            'view': context.get('view'),
-        })
         
         # Ensure consistent response format
         if not isinstance(response.data, dict) or 'error' not in response.data:

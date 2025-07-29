@@ -7,9 +7,6 @@ from django.db import transaction
 from django.core.exceptions import ValidationError
 from django.contrib.auth import get_user_model
 from .exceptions import BusinessLogicError, NotFoundError, PermissionDeniedError
-import logging
-
-logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
@@ -43,12 +40,7 @@ class BaseService(ABC):
         """
         Log service actions for audit purposes.
         """
-        logger.info(f"Service Action: {action}", extra={
-            'user': self.user.id if self.user else None,
-            'entity_id': entity_id,
-            'details': details or {},
-            'service': self.__class__.__name__,
-        })
+        pass
 
 
 class CRUDService(BaseService):

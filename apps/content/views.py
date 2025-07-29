@@ -11,7 +11,6 @@ from django.core.cache import cache
 from django.db.models import Q, Prefetch, F
 from django.utils import timezone
 
-from apps.core.monitoring import monitor_performance, track_user_action
 from apps.core.permissions import IsOwnerOrReadOnly
 from .models.post import Post, PostType, PostAttachment
 from .models.classification import Category, SubCategory, HashTag
@@ -70,7 +69,6 @@ class PostViewSet(viewsets.ModelViewSet):
         
         return [permission() for permission in permission_classes]
     
-    @monitor_performance(track_queries=True)
     def list(self, request):
         """List posts with caching and performance monitoring."""
         # Generate cache key based on filters and pagination
@@ -111,7 +109,6 @@ class PostViewSet(viewsets.ModelViewSet):
         
         return Response(response_data)
     
-    @monitor_performance(track_queries=True)
     def retrieve(self, request, slug=None):
         """Retrieve post with view tracking and real-time bookmark status."""
         # Get post with optimizations - NO CACHING to ensure bookmark status accuracy
@@ -122,8 +119,6 @@ class PostViewSet(viewsets.ModelViewSet):
         
         # Track view
         Post.objects.filter(id=post.id).update(view_count=F('view_count') + 1)
-        if request.user.is_authenticated:
-            track_user_action(request.user, 'view_post', 'post', slug)
         
         # Serialize with context to get real-time bookmark status
         serializer = self.get_serializer(post, context={'request': request})
@@ -141,8 +136,6 @@ class PostViewSet(viewsets.ModelViewSet):
         # Invalidate related caches
         cache.delete_many([f"post_list_{i}" for i in range(10)])  # Simple cache invalidation
         
-        # Track action
-        track_user_action(self.request.user, 'create_post', 'post', str(post.id))
     
     def perform_update(self, serializer):
         """Update post with cache invalidation."""
@@ -173,8 +166,6 @@ class PostViewSet(viewsets.ModelViewSet):
             # Invalidate list caches only (post detail is not cached)
             cache.delete_many([f"post_list_{i}" for i in range(10)])
             
-            # Track action
-            track_user_action(request.user, 'publish_post', 'post', slug)
             
             serializer = self.get_serializer(post)
             return Response(serializer.data)
@@ -201,7 +192,6 @@ class PostViewSet(viewsets.ModelViewSet):
             if existing_bookmark:
                 # Bookmark exists, remove it (unbookmark)
                 existing_bookmark.delete()  # This does soft delete
-                track_user_action(request.user, 'unbookmark_post', 'post', slug)
                 
                 return Response({
                     'bookmarked': False,
@@ -214,7 +204,6 @@ class PostViewSet(viewsets.ModelViewSet):
                     post=post,
                     notes=request.data.get('notes', '')
                 )
-                track_user_action(request.user, 'bookmark_post', 'post', slug)
                 
                 # Return bookmark data
                 bookmark_data = {
@@ -524,12 +513,6 @@ class SearchViewSet(viewsets.ViewSet):
             total_results = posts.count()
             posts = posts[start:end]
             
-            # Track search
-            if request.user.is_authenticated:
-                track_user_action(request.user, 'search', 'query', query, {
-                    'filters': filters,
-                    'results_count': total_results
-                })
             
             serializer = PostSerializer(posts, many=True)
             return Response({

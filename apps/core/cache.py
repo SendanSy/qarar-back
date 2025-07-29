@@ -9,9 +9,6 @@ from django.db.models import Model
 from django.utils import timezone
 from functools import wraps
 import json
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 class CacheKeyGenerator:
@@ -101,13 +98,8 @@ class CacheManager:
         """
         try:
             value = cache.get(key, default)
-            if value is not default:
-                logger.debug(f"Cache HIT: {key}")
-            else:
-                logger.debug(f"Cache MISS: {key}")
             return value
         except Exception as e:
-            logger.error(f"Cache GET error for key {key}: {e}")
             return default
     
     @classmethod
@@ -120,10 +112,8 @@ class CacheManager:
                 timeout = cls.TIMEOUTS.get(timeout, cls.TIMEOUTS['medium'])
             
             result = cache.set(key, value, timeout)
-            logger.debug(f"Cache SET: {key} (timeout: {timeout}s)")
             return result
         except Exception as e:
-            logger.error(f"Cache SET error for key {key}: {e}")
             return False
     
     @classmethod
@@ -133,10 +123,8 @@ class CacheManager:
         """
         try:
             result = cache.delete(key)
-            logger.debug(f"Cache DELETE: {key}")
             return result
         except Exception as e:
-            logger.error(f"Cache DELETE error for key {key}: {e}")
             return False
     
     @classmethod
@@ -147,14 +135,11 @@ class CacheManager:
         try:
             if hasattr(cache, 'delete_pattern'):
                 count = cache.delete_pattern(pattern)
-                logger.debug(f"Cache DELETE_PATTERN: {pattern} ({count} keys)")
                 return count
             else:
                 # Fallback for cache backends that don't support pattern deletion
-                logger.warning(f"Cache backend doesn't support pattern deletion: {pattern}")
                 return 0
         except Exception as e:
-            logger.error(f"Cache DELETE_PATTERN error for pattern {pattern}: {e}")
             return 0
     
     @classmethod
@@ -373,8 +358,7 @@ def invalidate_model_cache(sender, instance, **kwargs):
             PostCacheManager.invalidate_post(instance.id)
         
     except Exception as e:
-        logger.error(f"Error invalidating cache for {instance}: {e}")
-
+        pass
 
 # Utility functions for common caching patterns
 def cached_queryset(queryset, cache_key: str, timeout: Union[int, str] = 'medium'):
