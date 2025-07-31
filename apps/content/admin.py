@@ -252,7 +252,7 @@ class CategoryAdmin(ModelAdmin):
         }),
     )
     
-    readonly_fields = ['slug', 'post_count']
+    readonly_fields = ['post_count']
     prepopulated_fields = {'slug': ('name',)}
     
     @display(description=_('Name'))
@@ -297,7 +297,7 @@ class SubCategoryAdmin(ModelAdmin):
         }),
     )
     
-    readonly_fields = ['slug', 'post_count']
+    readonly_fields = ['post_count']
     prepopulated_fields = {'slug': ('name',)}
     
     @display(description=_('Name'))
@@ -350,7 +350,7 @@ class HashTagAdmin(ModelAdmin):
         }),
     )
     
-    readonly_fields = ['slug', 'post_count', 'last_used']
+    readonly_fields = ['post_count', 'last_used']
     
     actions = ['mark_trending', 'unmark_trending']
     

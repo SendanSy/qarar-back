@@ -40,7 +40,7 @@ class PostType(BaseModel):
         ordering = ['name']
 
     def __str__(self):
-        return self.name
+        return self.name_ar
 
 
 class Post(BaseModel):
@@ -190,7 +190,7 @@ class Post(BaseModel):
         ]
 
     def __str__(self):
-        return self.title
+        return self.title_ar
 
     def save(self, *args, **kwargs):
         # Auto-generate slug if not provided
