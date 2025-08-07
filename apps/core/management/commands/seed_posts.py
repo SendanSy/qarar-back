@@ -1,0 +1,527 @@
+"""
+Management command to seed posts from CSV data
+"""
+import pandas as pd
+import os
+import mimetypes
+from django.core.management.base import BaseCommand
+from django.db import transaction
+from django.utils import timezone
+from django.utils.text import slugify
+from django.contrib.auth import get_user_model
+from apps.content.models.post import Post, PostType, PostAttachment
+from apps.content.models.classification import Category, SubCategory
+from apps.producers.models import Organization, Subsidiary, Department
+
+User = get_user_model()
+
+
+class Command(BaseCommand):
+    help = 'Seeds posts from CSV data file'
+    
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--csv-path',
+            type=str,
+            default='apps/core/management/commands/posts_data.csv',
+            help='Path to CSV file containing post data'
+        )
+        parser.add_argument(
+            '--clean',
+            action='store_true',
+            help='Clean all seeded posts before seeding new ones'
+        )
+        parser.add_argument(
+            '--dry-run',
+            action='store_true',
+            help='Run without actually creating posts (for testing)'
+        )
+        parser.add_argument(
+            '--batch-size',
+            type=int,
+            default=100,
+            help='Number of posts to create in each batch'
+        )
+
+    def handle(self, *args, **options):
+        csv_path = options['csv_path']
+        dry_run = options['dry_run']
+        batch_size = options['batch_size']
+        
+        if options.get('clean'):
+            self.clean_posts()
+            if not dry_run:
+                return
+        
+        self.stdout.write(self.style.NOTICE(f'Starting post seeding from {csv_path}...'))
+        
+        try:
+            # Read CSV file
+            df = self.read_csv_data(csv_path)
+            if df.empty:
+                self.stdout.write(self.style.WARNING('CSV file is empty or not found'))
+                return
+            
+            # Cache related objects
+            self.stdout.write(self.style.NOTICE('Caching related objects...'))
+            related_objects = self.cache_related_objects()
+            
+            # Get or create author user
+            author = self.get_author_user()
+            if not author:
+                self.stdout.write(self.style.ERROR('Could not find or create author user'))
+                return
+            
+            # Process posts in batches
+            total_posts = len(df)
+            created_posts = 0
+            failed_posts = []
+            
+            for batch_start in range(0, total_posts, batch_size):
+                batch_end = min(batch_start + batch_size, total_posts)
+                batch_df = df.iloc[batch_start:batch_end]
+                
+                if dry_run:
+                    self.stdout.write(f'[DRY RUN] Would process posts {batch_start+1} to {batch_end}')
+                    continue
+                
+                try:
+                    with transaction.atomic():
+                        posts_created, attachments_created, errors = self.process_batch(
+                            batch_df, 
+                            related_objects, 
+                            author,
+                            batch_start
+                        )
+                        created_posts += posts_created
+                        
+                        if errors:
+                            failed_posts.extend(errors)
+                        
+                        self.stdout.write(
+                            f'Batch {batch_start//batch_size + 1}: '
+                            f'Created {posts_created} posts with {attachments_created} attachments'
+                        )
+                        
+                except Exception as e:
+                    self.stdout.write(
+                        self.style.ERROR(f'Failed to process batch {batch_start//batch_size + 1}: {str(e)}')
+                    )
+                    failed_posts.append(f'Batch {batch_start}-{batch_end}: {str(e)}')
+            
+            # Report results
+            self.stdout.write(self.style.SUCCESS(f'\nSeeding completed!'))
+            self.stdout.write(f'Total posts created: {created_posts}/{total_posts}')
+            
+            if failed_posts:
+                self.stdout.write(self.style.WARNING(f'\nFailed entries ({len(failed_posts)}):'))
+                for error in failed_posts[:10]:  # Show first 10 errors
+                    self.stdout.write(f'  - {error}')
+                if len(failed_posts) > 10:
+                    self.stdout.write(f'  ... and {len(failed_posts) - 10} more')
+                    
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'Fatal error: {str(e)}'))
+            raise
+
+    def clean_posts(self):
+        """Remove all posts created by Qarar Platform user"""
+        try:
+            author = User.objects.filter(username='qarar').first()
+            if author:
+                count = Post.objects.filter(author=author).count()
+                if count > 0:
+                    Post.objects.filter(author=author).delete()
+                    self.stdout.write(self.style.SUCCESS(f'Deleted {count} existing posts'))
+                else:
+                    self.stdout.write('No posts to clean')
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'Error cleaning posts: {str(e)}'))
+
+    def read_csv_data(self, csv_path):
+        """Read and validate CSV data"""
+        try:
+            # Read CSV with proper encoding for Arabic text
+            df = pd.read_csv(csv_path, encoding='utf-8')
+            
+            # Clean column names (remove spaces, lowercase)
+            df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_')
+            
+            self.stdout.write(f'Loaded {len(df)} rows from CSV')
+            self.stdout.write(f'Columns found: {", ".join(df.columns.tolist())}')
+            
+            return df
+        except FileNotFoundError:
+            self.stdout.write(self.style.ERROR(f'CSV file not found: {csv_path}'))
+            return pd.DataFrame()
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'Error reading CSV: {str(e)}'))
+            return pd.DataFrame()
+
+    def cache_related_objects(self):
+        """Cache all related objects for efficient lookup"""
+        cache = {
+            'post_types': {},
+            'categories': {},
+            'subcategories': {},
+            'organizations': {},
+            'subsidiaries': {},
+            'departments': {}
+        }
+        
+        # Cache PostTypes by name and name_ar
+        for pt in PostType.objects.all():
+            cache['post_types'][pt.name.lower()] = pt
+            cache['post_types'][pt.name_ar] = pt
+            
+        # Cache Categories by name and name_ar
+        for cat in Category.objects.all():
+            cache['categories'][cat.name.lower()] = cat
+            if hasattr(cat, 'name_ar') and cat.name_ar:
+                cache['categories'][cat.name_ar] = cat
+                
+        # Cache SubCategories by name
+        for subcat in SubCategory.objects.all():
+            cache['subcategories'][subcat.name.lower()] = subcat
+            if hasattr(subcat, 'name_ar') and subcat.name_ar:
+                cache['subcategories'][subcat.name_ar] = subcat
+                
+        # Cache Organizations by name and code
+        for org in Organization.objects.all():
+            cache['organizations'][org.name.lower()] = org
+            if hasattr(org, 'name_ar') and org.name_ar:
+                cache['organizations'][org.name_ar] = org
+            if hasattr(org, 'code') and org.code:
+                cache['organizations'][org.code.lower()] = org
+                
+        # Cache Subsidiaries
+        for sub in Subsidiary.objects.all():
+            cache['subsidiaries'][sub.name.lower()] = sub
+            if hasattr(sub, 'name_ar') and sub.name_ar:
+                cache['subsidiaries'][sub.name_ar] = sub
+                
+        # Cache Departments
+        for dept in Department.objects.all():
+            cache['departments'][dept.name.lower()] = dept
+            if hasattr(dept, 'name_ar') and dept.name_ar:
+                cache['departments'][dept.name_ar] = dept
+        
+        self.stdout.write(f'Cached: {len(cache["post_types"])} post types, '
+                         f'{len(cache["categories"])} categories, '
+                         f'{len(cache["subcategories"])} subcategories, '
+                         f'{len(cache["organizations"])} organizations')
+        
+        return cache
+
+    def get_author_user(self):
+        """Get or create the Qarar Platform user"""
+        try:
+            user, created = User.objects.get_or_create(
+                username='qarar',
+                defaults={
+                    'email': 'platform@qarar.sy',
+                    'first_name': 'Qarar',
+                    'last_name': 'Platform',
+                    'is_active': True,
+                    'is_staff': False
+                }
+            )
+            if created:
+                self.stdout.write(self.style.SUCCESS('Created Qarar Platform user'))
+            else:
+                self.stdout.write('Using existing Qarar Platform user')
+            return user
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'Error getting author user: {str(e)}'))
+            return None
+
+    def process_batch(self, batch_df, related_objects, author, start_index):
+        """Process a batch of posts"""
+        posts_to_create = []
+        posts_data = []  # Store additional data for M2M relations and attachments
+        errors = []
+        
+        for idx, row in batch_df.iterrows():
+            try:
+                # Prepare post data
+                post_data = self.prepare_post_data(row, related_objects, author, start_index + idx)
+                if post_data:
+                    # Separate core fields from M2M and attachment data
+                    core_fields = {k: v for k, v in post_data.items() 
+                                 if k not in ['categories', 'subcategories', 'attachments_data']}
+                    
+                    post = Post(**core_fields)
+                    posts_to_create.append(post)
+                    
+                    # Store M2M and attachment data for later
+                    attachment_urls = post_data.get('attachments_data', [])
+                    posts_data.append({
+                        'categories': post_data.get('categories', []),
+                        'subcategories': post_data.get('subcategories', []),
+                        'attachments_data': attachment_urls
+                    })
+                    
+                    # Debug log for attachments
+                    if attachment_urls:
+                        self.stdout.write(f"Row {start_index + idx}: Prepared {len(attachment_urls)} attachment URL(s) for later processing")
+                else:
+                    errors.append(f'Row {start_index + idx}: Could not prepare post data')
+                    
+            except Exception as e:
+                errors.append(f'Row {start_index + idx}: {str(e)}')
+        
+        # Bulk create posts
+        created_posts = []
+        if posts_to_create:
+            created_posts = Post.objects.bulk_create(posts_to_create, batch_size=100)
+            
+            # Process M2M relations and attachments for created posts
+            attachments_count = 0
+            for post, data in zip(created_posts, posts_data):
+                # Add categories
+                if data['categories']:
+                    post.categories.set(data['categories'])
+                    self.stdout.write(f"Set {len(data['categories'])} categories for post {post.id}")
+                
+                # Add subcategories
+                if data['subcategories']:
+                    post.subcategories.set(data['subcategories'])
+                    self.stdout.write(f"Set {len(data['subcategories'])} subcategories for post {post.id}")
+                
+                # Create attachments
+                if data.get('attachments_data'):
+                    self.stdout.write(f"Processing attachments for post {post.id}: {data['attachments_data']}")
+                    attachments = self.create_attachments(post, data['attachments_data'])
+                    attachments_count += len(attachments)
+                else:
+                    self.stdout.write(f"No attachments found for post {post.id}")
+        
+        return len(created_posts), attachments_count, errors
+
+    def prepare_post_data(self, row, related_objects, author, index):
+        """Prepare post data from CSV row"""
+        try:
+            # Get category for title generation
+            category_name = self.safe_get(row, ['category', 'categories'])
+            category = None
+            if category_name:
+                category_key = str(category_name).strip().lower()
+                category = related_objects['categories'].get(category_key)
+            
+            # Generate titles
+            category_display = category.name if category else 'General'
+            category_display_ar = category.name_ar if category and hasattr(category, 'name_ar') else 'عام'
+            
+            title = f"Post - {category_display} - #Syria"
+            title_ar = f"منشور - {category_display_ar} - #سوريا"
+            
+            # Generate unique slug
+            slug_base = slugify(title)
+            slug = f"{slug_base}-{index + 1}"
+            
+            # Get post type
+            post_type_name = self.safe_get(row, ['type', 'post_type'])
+            post_type = None
+            if post_type_name:
+                type_key = str(post_type_name).strip().lower()
+                post_type = related_objects['post_types'].get(type_key)
+            
+            if not post_type:
+                # Default to first available post type
+                post_type = PostType.objects.first()
+            
+            # Get organization
+            org_name = self.safe_get(row, ['organization', 'org'])
+            organization = None
+            if org_name:
+                org_key = str(org_name).strip().lower()
+                organization = related_objects['organizations'].get(org_key)
+            
+            if not organization:
+                # Default to first available organization
+                organization = Organization.objects.first()
+            
+            # Get subsidiary (optional)
+            sub_name = self.safe_get(row, ['subsidiary', 'sub'])
+            subsidiary = None
+            if sub_name and pd.notna(sub_name):
+                sub_key = str(sub_name).strip().lower()
+                subsidiary = related_objects['subsidiaries'].get(sub_key)
+            
+            # Get department (optional)
+            dept_name = self.safe_get(row, ['department', 'dept'])
+            department = None
+            if dept_name and pd.notna(dept_name):
+                dept_key = str(dept_name).strip().lower()
+                department = related_objects['departments'].get(dept_key)
+            
+            # Get content fields
+            content = self.safe_get(row, ['content', 'description'], '')
+            content_ar = self.safe_get(row, ['content_ar', 'arabic_content'], '')
+            summary = self.safe_get(row, ['summary'], '')
+            summary_ar = self.safe_get(row, ['summary_ar', 'arabic_summary'], '')
+            
+            # Get status
+            status = self.safe_get(row, ['status'], 'published')
+            if status not in ['draft', 'pending', 'published', 'archived', 'rejected']:
+                status = 'published'
+            
+            # Get published date
+            published_at = None
+            pub_date = self.safe_get(row, ['published_at', 'publish_date', 'date'])
+            if pub_date and pd.notna(pub_date):
+                try:
+                    published_at = pd.to_datetime(pub_date)
+                    if pd.isna(published_at):
+                        published_at = None
+                except:
+                    published_at = None
+            
+            if status == 'published' and not published_at:
+                published_at = timezone.now()
+            
+            # Prepare post data
+            post_data = {
+                'title': title,
+                'title_ar': title_ar,
+                'content': content if pd.notna(content) else '',
+                'content_ar': content_ar if pd.notna(content_ar) else '',
+                'summary': summary if pd.notna(summary) else '',
+                'summary_ar': summary_ar if pd.notna(summary_ar) else '',
+                'author': author,
+                'type': post_type,
+                'organization': organization,
+                'subsidiary': subsidiary,
+                'department': department,
+                'status': status,
+                'published_at': published_at,
+                'slug': slug,
+                'view_count': 0
+            }
+            
+            # Get categories (M2M)
+            categories = []
+            cat_names = self.safe_get(row, ['category', 'categories'])
+            if cat_names and pd.notna(cat_names):
+                for cat_name in str(cat_names).split(','):
+                    cat_key = cat_name.strip().lower()
+                    if cat_key in related_objects['categories']:
+                        categories.append(related_objects['categories'][cat_key])
+            
+            post_data['categories'] = categories
+            
+            # Get subcategories (M2M)
+            subcategories = []
+            subcat_names = self.safe_get(row, ['subcategory', 'subcategories'])
+            if subcat_names and pd.notna(subcat_names):
+                for subcat_name in str(subcat_names).split(','):
+                    subcat_key = subcat_name.strip().lower()
+                    if subcat_key in related_objects['subcategories']:
+                        subcategories.append(related_objects['subcategories'][subcat_key])
+            
+            post_data['subcategories'] = subcategories
+            
+            # Get attachments data from media_url column
+            attachments_data = []
+            attachment_urls = self.safe_get(row, ['media_url', 'attachment', 'files'])
+            if attachment_urls and pd.notna(attachment_urls):
+                # Convert to string and clean
+                url_text = str(attachment_urls).strip()
+                
+                # The media_url could be a single URL or multiple URLs
+                # Handle both newline-separated and space-separated URLs
+                if url_text:
+                    # Split by newlines first, then by spaces
+                    potential_urls = []
+                    for line in url_text.split('\n'):
+                        line = line.strip()
+                        if line:
+                            # Check if it's multiple space-separated URLs
+                            parts = line.split()
+                            for part in parts:
+                                part = part.strip()
+                                if part and (part.startswith('http') or part.startswith('/') or part.startswith('www')):
+                                    potential_urls.append(part)
+                    
+                    # If no URLs found by splitting, treat the whole thing as one URL
+                    if not potential_urls and url_text:
+                        potential_urls = [url_text]
+                    
+                    # Process each URL
+                    for url in potential_urls:
+                        url = url.strip()
+                        if url:
+                            # URL is already complete, just use it
+                            attachments_data.append(url)
+                            self.stdout.write(f"Found attachment URL: {url}")
+            
+            post_data['attachments_data'] = attachments_data
+            
+            return post_data
+            
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'Error preparing post data: {str(e)}'))
+            return None
+
+    def safe_get(self, row, columns, default=None):
+        """Safely get value from row by trying multiple column names"""
+        if isinstance(columns, str):
+            columns = [columns]
+        
+        for col in columns:
+            if col in row and pd.notna(row[col]):
+                return row[col]
+        
+        return default
+
+    def process_s3_url(self, url):
+        """Process and validate S3 URL"""
+        # URLs from CSV are already complete S3 URLs
+        # Just return them as-is
+        return url
+
+    def create_attachments(self, post, attachment_urls):
+        """Create PostAttachment objects for a post"""
+        attachments = []
+        
+        self.stdout.write(f"Creating {len(attachment_urls)} attachment(s) for post {post.id}")
+        
+        for idx, url in enumerate(attachment_urls):
+            try:
+                # Extract file name from URL
+                file_name = url.split('/')[-1].split('?')[0]  # Remove query params if any
+                
+                # Determine file type from URL
+                file_type = mimetypes.guess_type(file_name)[0] or 'application/octet-stream'
+                
+                # Generate a title from file name
+                title = file_name.replace('_', ' ').replace('-', ' ').rsplit('.', 1)[0]
+                
+                # Create the attachment
+                attachment = PostAttachment.objects.create(
+                    post=post,
+                    file=url,  # Store the S3 URL directly
+                    title=title[:255] if title else f"Attachment {idx+1}",
+                    file_type=file_type,
+                    order=idx,
+                    is_public=True,
+                    size=0  # We don't have the actual size from URL
+                )
+                attachments.append(attachment)
+                self.stdout.write(
+                    self.style.SUCCESS(f"✓ Created attachment #{idx+1}: {file_name}")
+                )
+                
+            except Exception as e:
+                self.stdout.write(
+                    self.style.ERROR(f"✗ Failed to create attachment #{idx+1} for post {post.id}")
+                )
+                self.stdout.write(f"  Error: {str(e)}")
+                self.stdout.write(f"  URL: {url}")
+        
+        if attachments:
+            self.stdout.write(
+                self.style.SUCCESS(f"Successfully created {len(attachments)} attachment(s) for post {post.id}")
+            )
+        
+        return attachments
