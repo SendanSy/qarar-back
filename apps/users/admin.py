@@ -35,7 +35,7 @@ class UserAdmin(BaseUserAdmin, ModelAdmin):
     ]
     
     list_filter = [
-        'is_active',
+        'is_active',    
         'is_staff',
         'is_superuser',
         'user_type',
