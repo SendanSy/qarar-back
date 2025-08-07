@@ -543,6 +543,22 @@ class Command(BaseCommand):
                 # CSV might have \n encoded as literal string
                 text = text.replace('\\n', '\n')
                 
+                # Add double newline before hashtags at the end
+                # Find hashtags at the end of content (after the last non-hashtag text)
+                # Pattern: Find where hashtags start (consecutive hashtags with spaces between them at the end)
+                hashtag_pattern = r'(\s*#[a-zA-Z0-9_\u0600-\u06FF]+(?:\s+#[a-zA-Z0-9_\u0600-\u06FF]+)*\s*)$'
+                match = re.search(hashtag_pattern, text)
+                if match:
+                    # Get the position where hashtags start
+                    hashtag_start = match.start()
+                    if hashtag_start > 0:
+                        # Get the text before hashtags and the hashtags
+                        text_before = text[:hashtag_start].rstrip()
+                        hashtags_part = match.group(1).strip()
+                        
+                        # Combine with double newline separator
+                        text = text_before + '\n\n' + hashtags_part
+                
                 return text
             
             content = process_content_newlines(content)
