@@ -58,7 +58,8 @@ class Post(BaseModel):
         verbose_name=_('Arabic Title')
     )
     content = models.TextField(
-        verbose_name=_('Content')
+        verbose_name=_('Content'),
+        blank=True,
     )
     content_ar = models.TextField(
         blank=True,
