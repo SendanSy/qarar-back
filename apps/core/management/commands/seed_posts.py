@@ -208,6 +208,39 @@ class Command(BaseCommand):
         except Exception as e:
             self.stdout.write(self.style.ERROR(f'Error cleaning database: {str(e)}'))
     
+    def get_or_create_hashtags(self, hashtag_names):
+        """Get or create hashtag objects from a list of names"""
+        hashtags = []
+        for tag_name in hashtag_names:
+            try:
+                # Skip if too short or too long
+                if len(tag_name) < 2 or len(tag_name) > 50:
+                    continue
+                
+                # Create slug - for Arabic tags, use the tag itself or transliterate
+                tag_slug = slugify(tag_name) if not any('\u0600' <= c <= '\u06FF' for c in tag_name) else tag_name
+                
+                # Get or create hashtag
+                hashtag, created = HashTag.objects.get_or_create(
+                    name=tag_name,
+                    defaults={
+                        'slug': tag_slug,
+                        'description': f'Hashtag for #{tag_name}',
+                        'is_active': True,
+                        'order': 0
+                    }
+                )
+                
+                hashtags.append(hashtag)
+                
+                if created:
+                    self.stdout.write(self.style.SUCCESS(f"✓ Created new hashtag: #{tag_name}"))
+                    
+            except Exception as e:
+                self.stdout.write(self.style.WARNING(f"Could not create/get hashtag '{tag_name}': {str(e)}"))
+        
+        return hashtags
+    
     def clean_orphaned_hashtags(self):
         """Delete only orphaned hashtags (hashtags with no posts)"""
         try:
@@ -339,14 +372,21 @@ class Command(BaseCommand):
         posts_data = []  # Store additional data for M2M relations and attachments
         errors = []
         
+        # First, collect all unique hashtag names from this batch
+        all_hashtag_names = set()
+        
         for idx, row in batch_df.iterrows():
             try:
                 # Prepare post data
                 post_data = self.prepare_post_data(row, related_objects, author, start_index + idx)
                 if post_data:
+                    # Collect hashtag names
+                    hashtag_names = post_data.get('hashtag_names', [])
+                    all_hashtag_names.update(hashtag_names)
+                    
                     # Separate core fields from M2M and attachment data
                     core_fields = {k: v for k, v in post_data.items() 
-                                 if k not in ['categories', 'subcategories', 'hashtags', 'attachments_data']}
+                                 if k not in ['categories', 'subcategories', 'hashtag_names', 'attachments_data']}
                     
                     post = Post(**core_fields)
                     posts_to_create.append(post)
@@ -356,7 +396,7 @@ class Command(BaseCommand):
                     posts_data.append({
                         'categories': post_data.get('categories', []),
                         'subcategories': post_data.get('subcategories', []),
-                        'hashtags': post_data.get('hashtags', []),
+                        'hashtag_names': hashtag_names,  # Store names, not objects yet
                         'attachments_data': attachment_urls
                     })
                     
@@ -369,6 +409,15 @@ class Command(BaseCommand):
             except Exception as e:
                 errors.append(f'Row {start_index + idx}: {str(e)}')
         
+        # Pre-create all hashtags outside the transaction
+        hashtag_cache = {}
+        if all_hashtag_names:
+            self.stdout.write(f"Pre-creating/fetching {len(all_hashtag_names)} unique hashtag(s) for this batch...")
+            hashtag_objects = self.get_or_create_hashtags(list(all_hashtag_names))
+            # Create a mapping from name to object
+            for hashtag in hashtag_objects:
+                hashtag_cache[hashtag.name] = hashtag
+        
         # Bulk create posts
         created_posts = []
         if posts_to_create:
@@ -377,33 +426,40 @@ class Command(BaseCommand):
             # Process M2M relations and attachments for created posts
             attachments_count = 0
             for post, data in zip(created_posts, posts_data):
-                # Add categories
-                if data['categories']:
-                    post.categories.set(data['categories'])
-                    self.stdout.write(f"Set {len(data['categories'])} categories for post {post.id}")
-                
-                # Add subcategories
-                if data['subcategories']:
-                    post.subcategories.set(data['subcategories'])
-                    self.stdout.write(f"Set {len(data['subcategories'])} subcategories for post {post.id}")
-                
-                # Add hashtags - IMPORTANT: Don't use set() as Post model may auto-extract
-                # We'll add our hashtags and let the model handle any additional extraction
-                if data.get('hashtags'):
-                    post.hashtags.add(*data['hashtags'])
-                    self.stdout.write(self.style.SUCCESS(f"✓ Linked {len(data['hashtags'])} hashtag(s) to post {post.id}"))
+                try:
+                    # Add categories
+                    if data['categories']:
+                        post.categories.set(data['categories'])
+                        self.stdout.write(f"Set {len(data['categories'])} categories for post {post.id}")
                     
-                    # Update hashtag post counts
-                    for hashtag in data['hashtags']:
-                        hashtag.update_post_count()
-                
-                # Create attachments
-                if data.get('attachments_data'):
-                    self.stdout.write(f"Processing attachments for post {post.id}: {data['attachments_data']}")
-                    attachments = self.create_attachments(post, data['attachments_data'])
-                    attachments_count += len(attachments)
-                else:
-                    self.stdout.write(f"No attachments found for post {post.id}")
+                    # Add subcategories
+                    if data['subcategories']:
+                        post.subcategories.set(data['subcategories'])
+                        self.stdout.write(f"Set {len(data['subcategories'])} subcategories for post {post.id}")
+                    
+                    # Add hashtags using the pre-created objects
+                    hashtag_names = data.get('hashtag_names', [])
+                    if hashtag_names:
+                        hashtags_to_link = [hashtag_cache[name] for name in hashtag_names if name in hashtag_cache]
+                        if hashtags_to_link:
+                            post.hashtags.add(*hashtags_to_link)
+                            self.stdout.write(self.style.SUCCESS(f"✓ Linked {len(hashtags_to_link)} hashtag(s) to post {post.id}"))
+                            
+                            # Update hashtag post counts
+                            for hashtag in hashtags_to_link:
+                                hashtag.update_post_count()
+                    
+                    # Create attachments
+                    if data.get('attachments_data'):
+                        self.stdout.write(f"Processing attachments for post {post.id}: {data['attachments_data']}")
+                        attachments = self.create_attachments(post, data['attachments_data'])
+                        attachments_count += len(attachments)
+                    else:
+                        self.stdout.write(f"No attachments found for post {post.id}")
+                        
+                except Exception as e:
+                    self.stdout.write(self.style.ERROR(f"Error processing post {post.id} relations: {str(e)}"))
+                    # Continue with next post instead of failing the whole batch
         
         return len(created_posts), attachments_count, errors
 
@@ -470,29 +526,29 @@ class Command(BaseCommand):
             summary = self.safe_get(row, ['summary'], '')
             summary_ar = self.safe_get(row, ['summary_ar', 'arabic_summary'], '')
             
-            # Preserve line breaks in content fields
-            # pandas reads CSV with line breaks preserved, but we need to ensure they're not stripped
-            if content and pd.notna(content):
-                # Keep the original formatting - don't strip or replace newlines
-                content = str(content)
-            else:
-                content = ''
+            # Process content fields to handle newlines properly
+            # Rule: 2+ spaces = newline, 1 space = normal space
+            def process_content_newlines(text):
+                if not text or pd.isna(text):
+                    return ''
                 
-            if content_ar and pd.notna(content_ar):
-                # Keep the original formatting - don't strip or replace newlines
-                content_ar = str(content_ar)
-            else:
-                content_ar = ''
+                text = str(text)
                 
-            if summary and pd.notna(summary):
-                summary = str(summary)
-            else:
-                summary = ''
+                # Replace 2 or more consecutive spaces with a newline
+                import re
+                # Match 2 or more spaces
+                text = re.sub(r'  +', '\n', text)
                 
-            if summary_ar and pd.notna(summary_ar):
-                summary_ar = str(summary_ar)
-            else:
-                summary_ar = ''
+                # Also preserve any existing newlines from CSV
+                # CSV might have \n encoded as literal string
+                text = text.replace('\\n', '\n')
+                
+                return text
+            
+            content = process_content_newlines(content)
+            content_ar = process_content_newlines(content_ar)
+            summary = process_content_newlines(summary)
+            summary_ar = process_content_newlines(summary_ar)
             
             # Get status
             status = self.safe_get(row, ['status'], 'published')
@@ -605,44 +661,12 @@ class Command(BaseCommand):
                     if tag and len(tag) >= 2:  # Minimum length of 2 characters
                         hashtag_names.add(tag)
             
-            # Create or get hashtag objects
-            for tag_name in hashtag_names:
-                try:
-                    # Normalize the hashtag name (already done above, but ensure it's clean)
-                    tag_name = tag_name.strip()
-                    
-                    # Skip if too short or too long
-                    if len(tag_name) < 2 or len(tag_name) > 50:
-                        continue
-                    
-                    # Create slug - for Arabic tags, use the tag itself or transliterate
-                    tag_slug = slugify(tag_name) if not any('\u0600' <= c <= '\u06FF' for c in tag_name) else tag_name
-                    
-                    # Get or create hashtag
-                    hashtag, created = HashTag.objects.get_or_create(
-                        name=tag_name,
-                        defaults={
-                            'slug': tag_slug,
-                            'description': f'Hashtag for #{tag_name}',
-                            'is_active': True,
-                            'order': 0
-                        }
-                    )
-                    
-                    hashtags_to_link.append(hashtag)
-                    
-                    if created:
-                        self.stdout.write(self.style.SUCCESS(f"✓ Created new hashtag: #{tag_name}"))
-                    else:
-                        self.stdout.write(f"  Using existing hashtag: #{tag_name}")
-                        
-                except Exception as e:
-                    self.stdout.write(self.style.WARNING(f"Could not create/get hashtag '{tag_name}': {str(e)}"))
+            # Store hashtag names for later creation (outside transaction)
+            # We'll create the actual HashTag objects later to avoid transaction issues
+            post_data['hashtag_names'] = list(hashtag_names)
             
-            post_data['hashtags'] = hashtags_to_link
-            
-            if hashtags_to_link:
-                self.stdout.write(self.style.SUCCESS(f"Row {index}: Prepared {len(hashtags_to_link)} hashtag(s)"))
+            if hashtag_names:
+                self.stdout.write(f"Row {index}: Found {len(hashtag_names)} hashtag name(s) to process later")
             
             # Get attachments data from media_url column
             attachments_data = []
@@ -722,6 +746,7 @@ class Command(BaseCommand):
         - /path/to/file.jpg (already a path)
         
         Returns the S3 key (path without bucket/domain)
+        IMPORTANT: Removes 'media/' prefix to avoid duplication
         """
         import re
         from urllib.parse import urlparse
@@ -729,42 +754,51 @@ class Command(BaseCommand):
         if not url:
             return None
         
-        # If it's already just a path, return it
+        # If it's already just a path, clean it
         if not url.startswith(('http://', 'https://', 's3://')):
-            return url.lstrip('/')
-        
-        # Parse the URL
-        parsed = urlparse(url)
-        
-        # Handle s3:// URLs
-        if parsed.scheme == 's3':
-            # s3://bucket/path/to/file.jpg -> path/to/file.jpg
-            path = parsed.path.lstrip('/')
-            return path
-        
-        # Handle https:// URLs
-        if parsed.scheme in ('http', 'https'):
-            # Extract path from different S3 URL patterns
+            path = url.lstrip('/')
+        else:
+            # Parse the URL
+            parsed = urlparse(url)
             
-            # Pattern 1: https://bucket.s3.region.amazonaws.com/path/to/file
-            # Pattern 2: https://bucket.s3.amazonaws.com/path/to/file
-            if '.s3.' in parsed.netloc and '.amazonaws.com' in parsed.netloc:
-                # Path is everything after the domain
-                return parsed.path.lstrip('/')
+            # Handle s3:// URLs
+            if parsed.scheme == 's3':
+                # s3://bucket/path/to/file.jpg -> path/to/file.jpg
+                path = parsed.path.lstrip('/')
             
-            # Pattern 3: https://s3.region.amazonaws.com/bucket/path/to/file
-            if parsed.netloc.startswith('s3.') and '.amazonaws.com' in parsed.netloc:
-                # Remove bucket name from path
-                path_parts = parsed.path.lstrip('/').split('/', 1)
-                if len(path_parts) > 1:
-                    return path_parts[1]
-                return path_parts[0] if path_parts else ''
-            
-            # For other URLs, just return the path
-            return parsed.path.lstrip('/')
+            # Handle https:// URLs
+            elif parsed.scheme in ('http', 'https'):
+                # Extract path from different S3 URL patterns
+                
+                # Pattern 1: https://bucket.s3.region.amazonaws.com/path/to/file
+                # Pattern 2: https://bucket.s3.amazonaws.com/path/to/file
+                if '.s3.' in parsed.netloc and '.amazonaws.com' in parsed.netloc:
+                    # Path is everything after the domain
+                    path = parsed.path.lstrip('/')
+                
+                # Pattern 3: https://s3.region.amazonaws.com/bucket/path/to/file
+                elif parsed.netloc.startswith('s3.') and '.amazonaws.com' in parsed.netloc:
+                    # Remove bucket name from path
+                    path_parts = parsed.path.lstrip('/').split('/', 1)
+                    if len(path_parts) > 1:
+                        path = path_parts[1]
+                    else:
+                        path = path_parts[0] if path_parts else ''
+                
+                # For other URLs, just return the path
+                else:
+                    path = parsed.path.lstrip('/')
+            else:
+                # Default: return path part
+                path = parsed.path.lstrip('/') if hasattr(parsed, 'path') else url
         
-        # Default: return path part
-        return parsed.path.lstrip('/') if hasattr(parsed, 'path') else url
+        # CRITICAL: Remove 'media/' prefix if present to avoid duplication
+        # Django will add 'media/' automatically when serving the file
+        if path.startswith('media/'):
+            path = path[6:]  # Remove 'media/' (6 characters)
+            self.stdout.write(f"  Removed 'media/' prefix from path: {path}")
+        
+        return path
 
     def create_attachments(self, post, attachment_urls):
         """
