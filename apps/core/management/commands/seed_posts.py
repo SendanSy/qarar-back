@@ -4,13 +4,15 @@ Management command to seed posts from CSV data
 import pandas as pd
 import os
 import mimetypes
+import json
+import re
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 from django.utils.text import slugify
 from django.contrib.auth import get_user_model
 from apps.content.models.post import Post, PostType, PostAttachment
-from apps.content.models.classification import Category, SubCategory
+from apps.content.models.classification import Category, SubCategory, HashTag
 from apps.producers.models import Organization, Subsidiary, Department
 
 User = get_user_model()
@@ -32,6 +34,16 @@ class Command(BaseCommand):
             help='Clean all seeded posts before seeding new ones'
         )
         parser.add_argument(
+            '--clean-posts',
+            action='store_true',
+            help='Force delete ALL posts and hashtags in the database'
+        )
+        parser.add_argument(
+            '--clean-orphaned-hashtags',
+            action='store_true',
+            help='Delete only orphaned hashtags (hashtags with no posts)'
+        )
+        parser.add_argument(
             '--dry-run',
             action='store_true',
             help='Run without actually creating posts (for testing)'
@@ -47,6 +59,15 @@ class Command(BaseCommand):
         csv_path = options['csv_path']
         dry_run = options['dry_run']
         batch_size = options['batch_size']
+        
+        # Handle cleanup options
+        if options.get('clean_posts'):
+            self.force_clean_all_posts()
+            return
+        
+        if options.get('clean_orphaned_hashtags'):
+            self.clean_orphaned_hashtags()
+            return
         
         if options.get('clean'):
             self.clean_posts()
@@ -125,18 +146,95 @@ class Command(BaseCommand):
             raise
 
     def clean_posts(self):
-        """Remove all posts created by Qarar Platform user"""
+        """Remove all posts created by Qarar Platform user and clean orphaned hashtags"""
         try:
             author = User.objects.filter(username='qarar').first()
             if author:
                 count = Post.objects.filter(author=author).count()
                 if count > 0:
+                    # Get hashtags used by these posts before deletion
+                    hashtags_to_check = set()
+                    for post in Post.objects.filter(author=author):
+                        hashtags_to_check.update(post.hashtags.all())
+                    
+                    # Delete the posts
                     Post.objects.filter(author=author).delete()
                     self.stdout.write(self.style.SUCCESS(f'Deleted {count} existing posts'))
+                    
+                    # Clean up orphaned hashtags (hashtags with no posts)
+                    orphaned_count = 0
+                    for hashtag in hashtags_to_check:
+                        if hashtag.posts.count() == 0:
+                            hashtag.delete()
+                            orphaned_count += 1
+                    
+                    if orphaned_count > 0:
+                        self.stdout.write(self.style.SUCCESS(f'Deleted {orphaned_count} orphaned hashtags'))
                 else:
                     self.stdout.write('No posts to clean')
         except Exception as e:
             self.stdout.write(self.style.ERROR(f'Error cleaning posts: {str(e)}'))
+    
+    def force_clean_all_posts(self):
+        """Force delete ALL posts and hashtags from the database"""
+        try:
+            post_count = Post.objects.all().count()
+            hashtag_count = HashTag.objects.all().count()
+            
+            if post_count > 0 or hashtag_count > 0:
+                self.stdout.write(self.style.WARNING('\n' + '='*60))
+                self.stdout.write(self.style.WARNING('WARNING: This will delete:'))
+                self.stdout.write(self.style.WARNING(f'  - ALL {post_count} posts'))
+                self.stdout.write(self.style.WARNING(f'  - ALL {hashtag_count} hashtags'))
+                self.stdout.write(self.style.WARNING('='*60))
+                
+                confirm = input('\nType "yes" to confirm: ')
+                if confirm.lower() == 'yes':
+                    # Delete all posts first (this will clear M2M relationships)
+                    if post_count > 0:
+                        Post.objects.all().delete()
+                        self.stdout.write(self.style.SUCCESS(f'✓ Deleted ALL {post_count} posts'))
+                    
+                    # Then delete all hashtags
+                    if hashtag_count > 0:
+                        HashTag.objects.all().delete()
+                        self.stdout.write(self.style.SUCCESS(f'✓ Deleted ALL {hashtag_count} hashtags'))
+                    
+                    self.stdout.write(self.style.SUCCESS('\nDatabase cleaned successfully!'))
+                else:
+                    self.stdout.write(self.style.WARNING('Operation cancelled'))
+            else:
+                self.stdout.write('No posts or hashtags to delete')
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'Error cleaning database: {str(e)}'))
+    
+    def clean_orphaned_hashtags(self):
+        """Delete only orphaned hashtags (hashtags with no posts)"""
+        try:
+            # Find all hashtags with no posts
+            orphaned_hashtags = HashTag.objects.filter(posts__isnull=True)
+            orphaned_count = orphaned_hashtags.count()
+            
+            if orphaned_count > 0:
+                self.stdout.write(self.style.WARNING(f'\nFound {orphaned_count} orphaned hashtag(s)'))
+                
+                # Show some examples
+                examples = orphaned_hashtags[:10]
+                for hashtag in examples:
+                    self.stdout.write(f'  - #{hashtag.name}')
+                if orphaned_count > 10:
+                    self.stdout.write(f'  ... and {orphaned_count - 10} more')
+                
+                confirm = input('\nDelete all orphaned hashtags? Type "yes" to confirm: ')
+                if confirm.lower() == 'yes':
+                    orphaned_hashtags.delete()
+                    self.stdout.write(self.style.SUCCESS(f'✓ Deleted {orphaned_count} orphaned hashtag(s)'))
+                else:
+                    self.stdout.write(self.style.WARNING('Operation cancelled'))
+            else:
+                self.stdout.write(self.style.SUCCESS('No orphaned hashtags found'))
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'Error cleaning orphaned hashtags: {str(e)}'))
 
     def read_csv_data(self, csv_path):
         """Read and validate CSV data"""
@@ -248,7 +346,7 @@ class Command(BaseCommand):
                 if post_data:
                     # Separate core fields from M2M and attachment data
                     core_fields = {k: v for k, v in post_data.items() 
-                                 if k not in ['categories', 'subcategories', 'attachments_data']}
+                                 if k not in ['categories', 'subcategories', 'hashtags', 'attachments_data']}
                     
                     post = Post(**core_fields)
                     posts_to_create.append(post)
@@ -258,6 +356,7 @@ class Command(BaseCommand):
                     posts_data.append({
                         'categories': post_data.get('categories', []),
                         'subcategories': post_data.get('subcategories', []),
+                        'hashtags': post_data.get('hashtags', []),
                         'attachments_data': attachment_urls
                     })
                     
@@ -287,6 +386,16 @@ class Command(BaseCommand):
                 if data['subcategories']:
                     post.subcategories.set(data['subcategories'])
                     self.stdout.write(f"Set {len(data['subcategories'])} subcategories for post {post.id}")
+                
+                # Add hashtags - IMPORTANT: Don't use set() as Post model may auto-extract
+                # We'll add our hashtags and let the model handle any additional extraction
+                if data.get('hashtags'):
+                    post.hashtags.add(*data['hashtags'])
+                    self.stdout.write(self.style.SUCCESS(f"✓ Linked {len(data['hashtags'])} hashtag(s) to post {post.id}"))
+                    
+                    # Update hashtag post counts
+                    for hashtag in data['hashtags']:
+                        hashtag.update_post_count()
                 
                 # Create attachments
                 if data.get('attachments_data'):
@@ -355,11 +464,35 @@ class Command(BaseCommand):
                 dept_key = str(dept_name).strip().lower()
                 department = related_objects['departments'].get(dept_key)
             
-            # Get content fields
+            # Get content fields - PRESERVE FORMATTING
             content = self.safe_get(row, ['content', 'description'], '')
             content_ar = self.safe_get(row, ['content_ar', 'arabic_content'], '')
             summary = self.safe_get(row, ['summary'], '')
             summary_ar = self.safe_get(row, ['summary_ar', 'arabic_summary'], '')
+            
+            # Preserve line breaks in content fields
+            # pandas reads CSV with line breaks preserved, but we need to ensure they're not stripped
+            if content and pd.notna(content):
+                # Keep the original formatting - don't strip or replace newlines
+                content = str(content)
+            else:
+                content = ''
+                
+            if content_ar and pd.notna(content_ar):
+                # Keep the original formatting - don't strip or replace newlines
+                content_ar = str(content_ar)
+            else:
+                content_ar = ''
+                
+            if summary and pd.notna(summary):
+                summary = str(summary)
+            else:
+                summary = ''
+                
+            if summary_ar and pd.notna(summary_ar):
+                summary_ar = str(summary_ar)
+            else:
+                summary_ar = ''
             
             # Get status
             status = self.safe_get(row, ['status'], 'published')
@@ -421,6 +554,96 @@ class Command(BaseCommand):
             
             post_data['subcategories'] = subcategories
             
+            # Extract and process hashtags
+            hashtags_to_link = []
+            
+            # First, try to get hashtags from CSV column
+            hashtags_csv = self.safe_get(row, ['hashtags', 'hashtag', 'tags'])
+            hashtag_names = set()
+            
+            if hashtags_csv and pd.notna(hashtags_csv):
+                # Parse hashtags from CSV (could be JSON array or comma-separated)
+                try:
+                    # Try parsing as JSON array first
+                    if hashtags_csv.startswith('['):
+                        hashtag_list = json.loads(hashtags_csv)
+                        for tag in hashtag_list:
+                            # Clean and normalize hashtag
+                            tag = str(tag).strip()
+                            if tag.startswith('#'):
+                                tag = tag[1:]
+                            if tag:
+                                # Only lowercase English hashtags, keep Arabic as-is
+                                if not any('\u0600' <= c <= '\u06FF' for c in tag):
+                                    tag = tag.lower()
+                                hashtag_names.add(tag)
+                    else:
+                        # Parse as comma-separated
+                        for tag in str(hashtags_csv).split(','):
+                            tag = tag.strip()
+                            if tag.startswith('#'):
+                                tag = tag[1:]
+                            if tag:
+                                # Only lowercase English hashtags, keep Arabic as-is
+                                if not any('\u0600' <= c <= '\u06FF' for c in tag):
+                                    tag = tag.lower()
+                                hashtag_names.add(tag)
+                except (json.JSONDecodeError, ValueError) as e:
+                    self.stdout.write(f"Could not parse hashtags from CSV: {hashtags_csv[:50]}...")
+            
+            # Also extract hashtags from content fields
+            content_to_scan = f"{content} {content_ar} {summary} {summary_ar}"
+            if content_to_scan:
+                # Extract hashtags using regex (supports Arabic and English)
+                hashtag_pattern = r'#([a-zA-Z0-9_\u0600-\u06FF]+)'
+                found_tags = re.findall(hashtag_pattern, content_to_scan)
+                for tag in found_tags:
+                    tag = tag.strip()
+                    # Only lowercase English hashtags, keep Arabic as-is
+                    if not any('\u0600' <= c <= '\u06FF' for c in tag):
+                        tag = tag.lower()
+                    if tag and len(tag) >= 2:  # Minimum length of 2 characters
+                        hashtag_names.add(tag)
+            
+            # Create or get hashtag objects
+            for tag_name in hashtag_names:
+                try:
+                    # Normalize the hashtag name (already done above, but ensure it's clean)
+                    tag_name = tag_name.strip()
+                    
+                    # Skip if too short or too long
+                    if len(tag_name) < 2 or len(tag_name) > 50:
+                        continue
+                    
+                    # Create slug - for Arabic tags, use the tag itself or transliterate
+                    tag_slug = slugify(tag_name) if not any('\u0600' <= c <= '\u06FF' for c in tag_name) else tag_name
+                    
+                    # Get or create hashtag
+                    hashtag, created = HashTag.objects.get_or_create(
+                        name=tag_name,
+                        defaults={
+                            'slug': tag_slug,
+                            'description': f'Hashtag for #{tag_name}',
+                            'is_active': True,
+                            'order': 0
+                        }
+                    )
+                    
+                    hashtags_to_link.append(hashtag)
+                    
+                    if created:
+                        self.stdout.write(self.style.SUCCESS(f"✓ Created new hashtag: #{tag_name}"))
+                    else:
+                        self.stdout.write(f"  Using existing hashtag: #{tag_name}")
+                        
+                except Exception as e:
+                    self.stdout.write(self.style.WARNING(f"Could not create/get hashtag '{tag_name}': {str(e)}"))
+            
+            post_data['hashtags'] = hashtags_to_link
+            
+            if hashtags_to_link:
+                self.stdout.write(self.style.SUCCESS(f"Row {index}: Prepared {len(hashtags_to_link)} hashtag(s)"))
+            
             # Get attachments data from media_url column
             attachments_data = []
             attachment_urls = self.safe_get(row, ['media_url', 'attachment', 'files'])
@@ -440,20 +663,33 @@ class Command(BaseCommand):
                             parts = line.split()
                             for part in parts:
                                 part = part.strip()
-                                if part and (part.startswith('http') or part.startswith('/') or part.startswith('www')):
+                                # Accept any URL that looks valid
+                                if part and (
+                                    part.startswith(('http://', 'https://')) or 
+                                    part.startswith('s3://') or
+                                    part.startswith('/') or
+                                    '.amazonaws.com' in part or
+                                    '.s3.' in part
+                                ):
                                     potential_urls.append(part)
                     
                     # If no URLs found by splitting, treat the whole thing as one URL
-                    if not potential_urls and url_text:
+                    if not potential_urls and url_text and (
+                        'http' in url_text or 
+                        's3://' in url_text or 
+                        '.amazonaws.com' in url_text
+                    ):
                         potential_urls = [url_text]
                     
                     # Process each URL
                     for url in potential_urls:
                         url = url.strip()
-                        if url:
-                            # URL is already complete, just use it
+                        if url and url not in attachments_data:  # Avoid duplicates
                             attachments_data.append(url)
-                            self.stdout.write(f"Found attachment URL: {url}")
+                            self.stdout.write(f"Found attachment URL: {url[:80]}...")  # Show first 80 chars
+            
+            if attachments_data:
+                self.stdout.write(self.style.SUCCESS(f"Row {index}: Found {len(attachments_data)} attachment URL(s)"))
             
             post_data['attachments_data'] = attachments_data
             
@@ -474,43 +710,112 @@ class Command(BaseCommand):
         
         return default
 
-    def process_s3_url(self, url):
-        """Process and validate S3 URL"""
-        # URLs from CSV are already complete S3 URLs
-        # Just return them as-is
-        return url
+    def extract_s3_key_from_url(self, url):
+        """
+        Extract S3 key/path from various S3 URL formats
+        
+        Handles:
+        - https://bucket.s3.region.amazonaws.com/path/to/file.jpg
+        - https://bucket.s3.amazonaws.com/path/to/file.jpg
+        - https://s3.region.amazonaws.com/bucket/path/to/file.jpg
+        - s3://bucket/path/to/file.jpg
+        - /path/to/file.jpg (already a path)
+        
+        Returns the S3 key (path without bucket/domain)
+        """
+        import re
+        from urllib.parse import urlparse
+        
+        if not url:
+            return None
+        
+        # If it's already just a path, return it
+        if not url.startswith(('http://', 'https://', 's3://')):
+            return url.lstrip('/')
+        
+        # Parse the URL
+        parsed = urlparse(url)
+        
+        # Handle s3:// URLs
+        if parsed.scheme == 's3':
+            # s3://bucket/path/to/file.jpg -> path/to/file.jpg
+            path = parsed.path.lstrip('/')
+            return path
+        
+        # Handle https:// URLs
+        if parsed.scheme in ('http', 'https'):
+            # Extract path from different S3 URL patterns
+            
+            # Pattern 1: https://bucket.s3.region.amazonaws.com/path/to/file
+            # Pattern 2: https://bucket.s3.amazonaws.com/path/to/file
+            if '.s3.' in parsed.netloc and '.amazonaws.com' in parsed.netloc:
+                # Path is everything after the domain
+                return parsed.path.lstrip('/')
+            
+            # Pattern 3: https://s3.region.amazonaws.com/bucket/path/to/file
+            if parsed.netloc.startswith('s3.') and '.amazonaws.com' in parsed.netloc:
+                # Remove bucket name from path
+                path_parts = parsed.path.lstrip('/').split('/', 1)
+                if len(path_parts) > 1:
+                    return path_parts[1]
+                return path_parts[0] if path_parts else ''
+            
+            # For other URLs, just return the path
+            return parsed.path.lstrip('/')
+        
+        # Default: return path part
+        return parsed.path.lstrip('/') if hasattr(parsed, 'path') else url
 
     def create_attachments(self, post, attachment_urls):
-        """Create PostAttachment objects for a post"""
+        """
+        Create PostAttachment objects for existing S3 files
+        IMPORTANT: Does not upload files - references existing S3 files
+        """
         attachments = []
         
         self.stdout.write(f"Creating {len(attachment_urls)} attachment(s) for post {post.id}")
         
         for idx, url in enumerate(attachment_urls):
             try:
-                # Extract file name from URL
-                file_name = url.split('/')[-1].split('?')[0]  # Remove query params if any
+                # Extract S3 key from URL
+                s3_key = self.extract_s3_key_from_url(url)
                 
-                # Determine file type from URL
+                if not s3_key:
+                    self.stdout.write(
+                        self.style.WARNING(f"✗ Could not extract S3 key from URL: {url}")
+                    )
+                    continue
+                
+                # Extract file name from S3 key
+                file_name = s3_key.split('/')[-1].split('?')[0]  # Remove query params if any
+                
+                # Determine file type from file name
                 file_type = mimetypes.guess_type(file_name)[0] or 'application/octet-stream'
                 
                 # Generate a title from file name
                 title = file_name.replace('_', ' ').replace('-', ' ').rsplit('.', 1)[0]
                 
-                # Create the attachment
+                # IMPORTANT: We need to create the attachment carefully to avoid file system access
+                # First, create the object with all fields EXCEPT the file
                 attachment = PostAttachment.objects.create(
                     post=post,
-                    file=url,  # Store the S3 URL directly
                     title=title[:255] if title else f"Attachment {idx+1}",
                     file_type=file_type,
                     order=idx,
                     is_public=True,
-                    size=0  # We don't have the actual size from URL
+                    size=0,  # Set to 0 since we can't get S3 file size without downloading
+                    file=''  # Create with empty file first
                 )
+                
+                # Now update ONLY the file field with the S3 key
+                # This bypasses the save() method that tries to access file.size
+                PostAttachment.objects.filter(id=attachment.id).update(file=s3_key)
+                
                 attachments.append(attachment)
                 self.stdout.write(
                     self.style.SUCCESS(f"✓ Created attachment #{idx+1}: {file_name}")
                 )
+                self.stdout.write(f"  S3 Key: {s3_key}")
                 
             except Exception as e:
                 self.stdout.write(
@@ -518,6 +823,8 @@ class Command(BaseCommand):
                 )
                 self.stdout.write(f"  Error: {str(e)}")
                 self.stdout.write(f"  URL: {url}")
+                import traceback
+                self.stdout.write(f"  Traceback: {traceback.format_exc()}")
         
         if attachments:
             self.stdout.write(
