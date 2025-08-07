@@ -36,10 +36,18 @@ class PostFilter(filters.FilterSet):
     # Custom search filter (note: DRF's SearchFilter handles 'search' parameter)
     content_search = filters.CharFilter(method='filter_search')
     
+    # Type filter
+    type_id = filters.UUIDFilter(field_name='type__id')
+    type_name = filters.CharFilter(field_name='type__name', lookup_expr='icontains')
+    type_name_ar = filters.CharFilter(field_name='type__name_ar', lookup_expr='icontains')
+    
     # Organization filters
+    organization_id = filters.UUIDFilter(field_name='organization__id')
     organization_code = filters.CharFilter(field_name='organization__code')
+    subsidiary_id = filters.UUIDFilter(field_name='subsidiary__id')
     subsidiary_code = filters.CharFilter(field_name='subsidiary__code')
     department = filters.NumberFilter(field_name='department__id')
+    department_id = filters.UUIDFilter(field_name='department__id')
     department_code = filters.CharFilter(field_name='department__code')
     
     class Meta:
