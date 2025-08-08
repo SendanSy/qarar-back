@@ -211,33 +211,61 @@ class Command(BaseCommand):
     def get_or_create_hashtags(self, hashtag_names):
         """Get or create hashtag objects from a list of names"""
         hashtags = []
+        
         for tag_name in hashtag_names:
+            if not tag_name:
+                continue
+                
             try:
-                # Skip if too short or too long
-                if len(tag_name) < 2 or len(tag_name) > 50:
+                # Clean the name - NO # sign should be in the name
+                tag_name = tag_name.strip()
+                if tag_name.startswith('#'):
+                    tag_name = tag_name[1:]
+                
+                # Skip if invalid length
+                if len(tag_name) < 2 or len(tag_name) > 100:
                     continue
                 
-                # Create slug - for Arabic tags, use the tag itself or transliterate
-                tag_slug = slugify(tag_name) if not any('\u0600' <= c <= '\u06FF' for c in tag_name) else tag_name
+                # For slug, use the name itself for Arabic, slugify for English
+                # This ensures Arabic hashtags keep their Arabic slug
+                if any('\u0600' <= c <= '\u06FF' for c in tag_name):
+                    # Arabic hashtag - use name as slug
+                    tag_slug = tag_name
+                else:
+                    # English hashtag - slugify it
+                    tag_slug = slugify(tag_name) or tag_name
                 
-                # Get or create hashtag
-                hashtag, created = HashTag.objects.get_or_create(
-                    name=tag_name,
-                    defaults={
-                        'slug': tag_slug,
-                        'description': f'Hashtag for #{tag_name}',
-                        'is_active': True,
-                        'order': 0
-                    }
-                )
+                # First try to get by name (exact match)
+                hashtag = HashTag.objects.filter(name=tag_name).first()
+                
+                if not hashtag:
+                    # If not found by name, check if slug already exists
+                    # This handles cases where different names might generate the same slug
+                    existing_by_slug = HashTag.objects.filter(slug=tag_slug).first()
+                    
+                    if existing_by_slug:
+                        # Slug conflict - use the existing hashtag
+                        hashtag = existing_by_slug
+                        self.stdout.write(self.style.WARNING(
+                            f"  Slug conflict for '{tag_name}' - using existing hashtag '{existing_by_slug.name}'"
+                        ))
+                    else:
+                        # Create new hashtag
+                        hashtag = HashTag.objects.create(
+                            name=tag_name,  # Store WITHOUT # sign
+                            slug=tag_slug,
+                            description=f'Hashtag for {tag_name}',
+                            is_active=True,
+                            order=0
+                        )
+                        self.stdout.write(self.style.SUCCESS(f"✓ Created new hashtag: {tag_name}"))
+                else:
+                    self.stdout.write(f"  Using existing hashtag: {tag_name}")
                 
                 hashtags.append(hashtag)
-                
-                if created:
-                    self.stdout.write(self.style.SUCCESS(f"✓ Created new hashtag: #{tag_name}"))
                     
             except Exception as e:
-                self.stdout.write(self.style.WARNING(f"Could not create/get hashtag '{tag_name}': {str(e)}"))
+                self.stdout.write(self.style.ERROR(f"Error with hashtag '{tag_name}': {str(e)}"))
         
         return hashtags
     
@@ -412,11 +440,20 @@ class Command(BaseCommand):
         # Pre-create all hashtags outside the transaction
         hashtag_cache = {}
         if all_hashtag_names:
-            self.stdout.write(f"Pre-creating/fetching {len(all_hashtag_names)} unique hashtag(s) for this batch...")
-            hashtag_objects = self.get_or_create_hashtags(list(all_hashtag_names))
+            unique_names = list(all_hashtag_names)
+            self.stdout.write(f"\nPre-creating/fetching {len(unique_names)} unique hashtag(s) for this batch...")
+            hashtag_objects = self.get_or_create_hashtags(unique_names)
+            
             # Create a mapping from name to object
+            # Important: hashtag names are stored WITHOUT # sign
             for hashtag in hashtag_objects:
-                hashtag_cache[hashtag.name] = hashtag
+                # Store with the clean name (no # sign)
+                clean_name = hashtag.name
+                hashtag_cache[clean_name] = hashtag
+                # Also store with # for matching if needed
+                hashtag_cache[f"#{clean_name}"] = hashtag
+            
+            self.stdout.write(f"Successfully cached {len(hashtag_cache)} hashtag mappings")
         
         # Bulk create posts
         created_posts = []
@@ -440,14 +477,29 @@ class Command(BaseCommand):
                     # Add hashtags using the pre-created objects
                     hashtag_names = data.get('hashtag_names', [])
                     if hashtag_names:
-                        hashtags_to_link = [hashtag_cache[name] for name in hashtag_names if name in hashtag_cache]
+                        hashtags_to_link = []
+                        for name in hashtag_names:
+                            # Clean the name (remove # if present)
+                            clean_name = name.strip()
+                            if clean_name.startswith('#'):
+                                clean_name = clean_name[1:]
+                            
+                            # Find in cache
+                            if clean_name in hashtag_cache:
+                                hashtags_to_link.append(hashtag_cache[clean_name])
+                            else:
+                                self.stdout.write(self.style.WARNING(f"Hashtag '{clean_name}' not found in cache"))
+                        
                         if hashtags_to_link:
                             post.hashtags.add(*hashtags_to_link)
                             self.stdout.write(self.style.SUCCESS(f"✓ Linked {len(hashtags_to_link)} hashtag(s) to post {post.id}"))
                             
                             # Update hashtag post counts
                             for hashtag in hashtags_to_link:
-                                hashtag.update_post_count()
+                                try:
+                                    hashtag.update_post_count()
+                                except:
+                                    pass  # Continue if update fails
                     
                     # Create attachments
                     if data.get('attachments_data'):
@@ -626,63 +678,52 @@ class Command(BaseCommand):
             
             post_data['subcategories'] = subcategories
             
-            # Extract and process hashtags
-            hashtags_to_link = []
-            
-            # First, try to get hashtags from CSV column
+            # Parse hashtags from CSV column ONLY
+            hashtag_names = []
             hashtags_csv = self.safe_get(row, ['hashtags', 'hashtag', 'tags'])
-            hashtag_names = set()
             
             if hashtags_csv and pd.notna(hashtags_csv):
-                # Parse hashtags from CSV (could be JSON array or comma-separated)
                 try:
-                    # Try parsing as JSON array first
-                    if hashtags_csv.startswith('['):
-                        hashtag_list = json.loads(hashtags_csv)
-                        for tag in hashtag_list:
-                            # Clean and normalize hashtag
+                    hashtag_list = []
+                    
+                    # Check if it's a JSON array
+                    if isinstance(hashtags_csv, str):
+                        hashtags_csv = hashtags_csv.strip()
+                        
+                        if hashtags_csv.startswith('[') and hashtags_csv.endswith(']'):
+                            # It's a JSON array - parse it
+                            # CSV escapes quotes by doubling them, pandas already handles this
+                            hashtag_list = json.loads(hashtags_csv)
+                        else:
+                            # Not JSON, try comma-separated
+                            hashtag_list = [h.strip() for h in hashtags_csv.split(',') if h.strip()]
+                    
+                    # Clean each hashtag
+                    for tag in hashtag_list:
+                        if tag:
                             tag = str(tag).strip()
+                            # Remove # sign if present
                             if tag.startswith('#'):
                                 tag = tag[1:]
-                            if tag:
-                                # Only lowercase English hashtags, keep Arabic as-is
-                                if not any('\u0600' <= c <= '\u06FF' for c in tag):
-                                    tag = tag.lower()
-                                hashtag_names.add(tag)
-                    else:
-                        # Parse as comma-separated
-                        for tag in str(hashtags_csv).split(','):
-                            tag = tag.strip()
-                            if tag.startswith('#'):
-                                tag = tag[1:]
-                            if tag:
-                                # Only lowercase English hashtags, keep Arabic as-is
-                                if not any('\u0600' <= c <= '\u06FF' for c in tag):
-                                    tag = tag.lower()
-                                hashtag_names.add(tag)
+                            
+                            # Remove any remaining quotes
+                            tag = tag.strip('"\'')
+                            
+                            # Only add if valid
+                            if tag and 2 <= len(tag) <= 100:
+                                hashtag_names.append(tag)
+                                
                 except (json.JSONDecodeError, ValueError) as e:
-                    self.stdout.write(f"Could not parse hashtags from CSV: {hashtags_csv[:50]}...")
+                    self.stdout.write(self.style.ERROR(f"Error parsing hashtags at row {index}: {str(e)}"))
+                    self.stdout.write(f"  Raw value: {repr(hashtags_csv)}")  # Use repr to see escape characters
             
-            # Also extract hashtags from content fields
-            content_to_scan = f"{content} {content_ar} {summary} {summary_ar}"
-            if content_to_scan:
-                # Extract hashtags using regex (supports Arabic and English)
-                hashtag_pattern = r'#([a-zA-Z0-9_\u0600-\u06FF]+)'
-                found_tags = re.findall(hashtag_pattern, content_to_scan)
-                for tag in found_tags:
-                    tag = tag.strip()
-                    # Only lowercase English hashtags, keep Arabic as-is
-                    if not any('\u0600' <= c <= '\u06FF' for c in tag):
-                        tag = tag.lower()
-                    if tag and len(tag) >= 2:  # Minimum length of 2 characters
-                        hashtag_names.add(tag)
-            
-            # Store hashtag names for later creation (outside transaction)
-            # We'll create the actual HashTag objects later to avoid transaction issues
-            post_data['hashtag_names'] = list(hashtag_names)
+            # Store hashtag names for later processing
+            post_data['hashtag_names'] = hashtag_names
             
             if hashtag_names:
-                self.stdout.write(f"Row {index}: Found {len(hashtag_names)} hashtag name(s) to process later")
+                self.stdout.write(self.style.SUCCESS(f"Row {index}: Found {len(hashtag_names)} hashtag(s):"))
+                for ht in hashtag_names:
+                    self.stdout.write(f"  - {ht}")
             
             # Get attachments data from media_url column
             attachments_data = []
