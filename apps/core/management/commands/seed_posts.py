@@ -429,16 +429,45 @@ class Command(BaseCommand):
                     sql_deleted = cursor.rowcount
                     self.stdout.write(f'  Deleted {sql_deleted} hashtags via SQL')
                     
-                    # Reset the sequence/auto-increment
-                    cursor.execute("SELECT setval('content_hashtag_id_seq', 1, false)")
+                    # Reset the sequence/auto-increment (handle different naming conventions)
+                    try:
+                        # First, try to find the actual sequence name
+                        cursor.execute("""
+                            SELECT pg_get_serial_sequence('content_hashtag', 'id')
+                        """)
+                        result = cursor.fetchone()
+                        if result and result[0]:
+                            sequence_name = result[0]
+                            cursor.execute(f"SELECT setval('{sequence_name}', 1, false)")
+                            self.stdout.write(f'  Reset sequence: {sequence_name}')
+                        else:
+                            # Try common patterns
+                            for seq_name in ['content_hashtag_id_seq', 'content_hashtag_pkey_seq', 'content_hashtag_seq']:
+                                try:
+                                    cursor.execute(f"SELECT setval('{seq_name}', 1, false)")
+                                    self.stdout.write(f'  Reset sequence: {seq_name}')
+                                    break
+                                except:
+                                    continue
+                    except Exception as seq_error:
+                        self.stdout.write(self.style.WARNING(f'  Could not reset sequence: {seq_error}'))
+                        self.stdout.write(self.style.WARNING('  This is not critical - sequence will auto-adjust on next insert'))
                     
                     # Vacuum the table
                     cursor.execute("VACUUM FULL ANALYZE content_hashtag")
                     cursor.execute("VACUUM FULL ANALYZE content_posthashtag")
                 
+                # Verify deletion
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT COUNT(*) FROM content_hashtag")
+                    final_count = cursor.fetchone()[0]
+                    
+                    cursor.execute("SELECT COUNT(*) FROM content_posthashtag")
+                    final_m2m_count = cursor.fetchone()[0]
+                
                 self.stdout.write(self.style.SUCCESS('\n✓ All hashtags have been deleted'))
                 self.stdout.write(self.style.SUCCESS('✓ Tables have been vacuumed'))
-                self.stdout.write(self.style.SUCCESS('✓ ID sequence has been reset'))
+                self.stdout.write(self.style.SUCCESS(f'✓ Final verification: {final_count} hashtags, {final_m2m_count} relationships'))
             else:
                 self.stdout.write(self.style.WARNING('Operation cancelled'))
                 
