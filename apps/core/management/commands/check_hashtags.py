@@ -31,6 +31,9 @@ class Command(BaseCommand):
         
         self.stdout.write(self.style.NOTICE('Checking hashtag database state...\n'))
         
+        # 0. Show basic counts
+        self.show_counts()
+        
         # 1. Check for duplicate slugs (shouldn't exist due to unique constraint)
         self.check_duplicate_slugs()
         
@@ -43,9 +46,70 @@ class Command(BaseCommand):
         # 4. Check for invisible characters
         self.check_invisible_chars()
         
+        # 5. Show sample hashtags
+        self.show_sample_hashtags()
+        
         if fix:
             self.stdout.write(self.style.WARNING('\nAttempting to fix issues...'))
             self.fix_issues()
+    
+    def show_counts(self):
+        """Show basic hashtag counts"""
+        from django.db import connection
+        
+        # ORM count
+        orm_count = HashTag.objects.all().count()
+        orphaned_count = HashTag.objects.filter(posts__isnull=True).count()
+        
+        # SQL count
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM content_hashtag")
+            sql_count = cursor.fetchone()[0]
+            
+            cursor.execute("""
+                SELECT COUNT(DISTINCT h.id) 
+                FROM content_hashtag h
+                LEFT JOIN content_posthashtag ph ON h.id = ph.hashtag_id
+                WHERE ph.id IS NULL
+            """)
+            sql_orphaned = cursor.fetchone()[0]
+        
+        self.stdout.write(f"Hashtag counts:")
+        self.stdout.write(f"  Total (ORM): {orm_count}")
+        self.stdout.write(f"  Total (SQL): {sql_count}")
+        self.stdout.write(f"  Orphaned (ORM): {orphaned_count}")
+        self.stdout.write(f"  Orphaned (SQL): {sql_orphaned}")
+        self.stdout.write("")
+    
+    def show_sample_hashtags(self):
+        """Show sample hashtags to understand what's in the database"""
+        self.stdout.write("\nSample hashtags in database:")
+        
+        # Get first 10 hashtags
+        hashtags = HashTag.objects.all()[:10]
+        if hashtags:
+            for h in hashtags:
+                post_count = h.posts.count()
+                self.stdout.write(f"  - ID: {h.id}, Name: '{h.name}', Slug: '{h.slug}', Posts: {post_count}")
+        else:
+            self.stdout.write("  No hashtags found via ORM")
+        
+        # Also check via SQL
+        from django.db import connection
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT h.id, h.name, h.slug, COUNT(ph.id) as post_count
+                FROM content_hashtag h
+                LEFT JOIN content_posthashtag ph ON h.id = ph.hashtag_id
+                GROUP BY h.id, h.name, h.slug
+                LIMIT 10
+            """)
+            sql_hashtags = cursor.fetchall()
+            
+            if sql_hashtags:
+                self.stdout.write("\nVia SQL:")
+                for row in sql_hashtags:
+                    self.stdout.write(f"  - ID: {row[0]}, Name: '{row[1]}', Slug: '{row[2]}', Posts: {row[3]}")
     
     def check_specific_slug(self, slug):
         """Check a specific slug for conflicts"""

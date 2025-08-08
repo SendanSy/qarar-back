@@ -269,12 +269,19 @@ class CategoryViewSet(viewsets.ReadOnlyModelViewSet):
     
     def get_queryset(self):
         """Get optimized queryset."""
-        return Category.objects.filter(is_active=True)
+        return Category.objects.filter(is_active=True).order_by('order', 'name')
     
-    @method_decorator(cache_page(60 * 30))  # Cache for 30 minutes
     def list(self, request):
-        """List categories with caching."""
+        """List categories with caching and pagination."""
         queryset = self.filter_queryset(self.get_queryset())
+        
+        # Apply pagination
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        # Fallback if pagination is not configured
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
     

@@ -44,6 +44,11 @@ class Command(BaseCommand):
             help='Delete only orphaned hashtags (hashtags with no posts)'
         )
         parser.add_argument(
+            '--clean-all-hashtags',
+            action='store_true',
+            help='Force delete ALL hashtags from the database (dangerous!)'
+        )
+        parser.add_argument(
             '--vacuum-hashtags',
             action='store_true',
             help='Vacuum and reindex hashtag table to fix potential issues'
@@ -72,6 +77,10 @@ class Command(BaseCommand):
         
         if options.get('clean_orphaned_hashtags'):
             self.clean_orphaned_hashtags()
+            return
+        
+        if options.get('clean_all_hashtags'):
+            self.force_clean_all_hashtags()
             return
         
         if options.get('vacuum_hashtags'):
@@ -377,6 +386,64 @@ class Command(BaseCommand):
                     self.stdout.write(self.style.ERROR(f"Could not recover hashtag '{tag_name}': {str(e)} | Recovery error: {str(recovery_error)}"))
         
         return hashtags
+    
+    def force_clean_all_hashtags(self):
+        """Force delete ALL hashtags from the database (with safety checks)"""
+        try:
+            from django.db import connection
+            
+            # First check how many hashtags exist
+            total_count = HashTag.objects.all().count()
+            
+            # Also check via raw SQL
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) FROM content_hashtag")
+                sql_count = cursor.fetchone()[0]
+            
+            self.stdout.write(self.style.WARNING('\n' + '='*60))
+            self.stdout.write(self.style.WARNING('WARNING: This will delete ALL hashtags!'))
+            self.stdout.write(self.style.WARNING(f'  - Hashtags via ORM: {total_count}'))
+            self.stdout.write(self.style.WARNING(f'  - Hashtags via SQL: {sql_count}'))
+            self.stdout.write(self.style.WARNING('='*60))
+            
+            if total_count == 0 and sql_count == 0:
+                self.stdout.write(self.style.SUCCESS('No hashtags to delete'))
+                return
+            
+            confirm = input('\nType "DELETE ALL HASHTAGS" to confirm: ')
+            if confirm == 'DELETE ALL HASHTAGS':
+                # Clear all M2M relationships first
+                self.stdout.write('Clearing all post-hashtag relationships...')
+                with connection.cursor() as cursor:
+                    cursor.execute("DELETE FROM content_posthashtag")
+                    m2m_deleted = cursor.rowcount
+                    self.stdout.write(f'  Deleted {m2m_deleted} post-hashtag relationships')
+                
+                # Delete via ORM
+                orm_deleted = HashTag.objects.all().delete()
+                self.stdout.write(f'  Deleted {orm_deleted[0]} hashtags via ORM')
+                
+                # Force delete via SQL to catch any orphaned records
+                with connection.cursor() as cursor:
+                    cursor.execute("DELETE FROM content_hashtag")
+                    sql_deleted = cursor.rowcount
+                    self.stdout.write(f'  Deleted {sql_deleted} hashtags via SQL')
+                    
+                    # Reset the sequence/auto-increment
+                    cursor.execute("SELECT setval('content_hashtag_id_seq', 1, false)")
+                    
+                    # Vacuum the table
+                    cursor.execute("VACUUM FULL ANALYZE content_hashtag")
+                    cursor.execute("VACUUM FULL ANALYZE content_posthashtag")
+                
+                self.stdout.write(self.style.SUCCESS('\n✓ All hashtags have been deleted'))
+                self.stdout.write(self.style.SUCCESS('✓ Tables have been vacuumed'))
+                self.stdout.write(self.style.SUCCESS('✓ ID sequence has been reset'))
+            else:
+                self.stdout.write(self.style.WARNING('Operation cancelled'))
+                
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'Error cleaning hashtags: {str(e)}'))
     
     def vacuum_hashtags(self):
         """Vacuum and reindex hashtag table to fix potential database issues"""
