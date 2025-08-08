@@ -107,12 +107,53 @@ class Command(BaseCommand):
                     continue
                 
                 try:
+                    # First, pre-process the batch to collect hashtags BEFORE entering transaction
+                    all_hashtag_names = set()
+                    for idx, row in batch_df.iterrows():
+                        hashtags_csv = self.safe_get(row, ['hashtags', 'hashtag', 'tags'])
+                        if hashtags_csv and pd.notna(hashtags_csv):
+                            try:
+                                hashtag_list = []
+                                if isinstance(hashtags_csv, str):
+                                    hashtags_csv = hashtags_csv.strip()
+                                    if hashtags_csv.startswith('[') and hashtags_csv.endswith(']'):
+                                        hashtag_list = json.loads(hashtags_csv)
+                                    else:
+                                        hashtag_list = [h.strip() for h in hashtags_csv.split(',') if h.strip()]
+                                
+                                for tag in hashtag_list:
+                                    if tag:
+                                        tag = str(tag).strip()
+                                        if tag.startswith('#'):
+                                            tag = tag[1:]
+                                        tag = tag.strip('"\'')
+                                        if tag and 2 <= len(tag) <= 100:
+                                            all_hashtag_names.add(tag)
+                            except:
+                                pass
+                    
+                    # Pre-create hashtags BEFORE entering the transaction
+                    hashtag_cache = {}
+                    if all_hashtag_names:
+                        unique_names = list(all_hashtag_names)
+                        self.stdout.write(f"\nPre-creating/fetching {len(unique_names)} unique hashtag(s) for batch {batch_start//batch_size + 1}...")
+                        hashtag_objects = self.get_or_create_hashtags(unique_names)
+                        
+                        for hashtag in hashtag_objects:
+                            clean_name = hashtag.name
+                            hashtag_cache[clean_name] = hashtag
+                            hashtag_cache[f"#{clean_name}"] = hashtag
+                        
+                        self.stdout.write(f"Successfully cached {len(hashtag_cache)} hashtag mappings")
+                    
+                    # Now enter the transaction with hashtags already created
                     with transaction.atomic():
-                        posts_created, attachments_created, errors = self.process_batch(
+                        posts_created, attachments_created, errors = self.process_batch_with_hashtags(
                             batch_df, 
                             related_objects, 
                             author,
-                            batch_start
+                            batch_start,
+                            hashtag_cache  # Pass the pre-created hashtags
                         )
                         
                         # CRITICAL: If there are ANY errors, raise exception to rollback the entire batch
@@ -227,41 +268,46 @@ class Command(BaseCommand):
             if not tag_name:
                 continue
                 
+            # Use separate transaction for each hashtag to isolate errors
             try:
-                # Clean the name - NO # sign should be in the name
-                tag_name = tag_name.strip()
-                if tag_name.startswith('#'):
-                    tag_name = tag_name[1:]
-                
-                # Skip if invalid length
-                if len(tag_name) < 2 or len(tag_name) > 100:
-                    continue
-                
-                # For slug, use the name itself for Arabic, slugify for English
-                # This ensures Arabic hashtags keep their Arabic slug
-                if any('\u0600' <= c <= '\u06FF' for c in tag_name):
-                    # Arabic hashtag - use name as slug
-                    tag_slug = tag_name
-                else:
-                    # English hashtag - slugify it
-                    tag_slug = slugify(tag_name) or tag_name
-                
-                # First try to get by name (exact match)
-                hashtag = HashTag.objects.filter(name=tag_name).first()
-                
-                if not hashtag:
-                    # If not found by name, check if slug already exists
-                    # This handles cases where different names might generate the same slug
-                    existing_by_slug = HashTag.objects.filter(slug=tag_slug).first()
+                with transaction.atomic():
+                    # Clean the name - NO # sign should be in the name
+                    tag_name = tag_name.strip()
+                    if tag_name.startswith('#'):
+                        tag_name = tag_name[1:]
                     
-                    if existing_by_slug:
-                        # Slug conflict - use the existing hashtag
-                        hashtag = existing_by_slug
-                        self.stdout.write(self.style.WARNING(
-                            f"  Slug conflict for '{tag_name}' - using existing hashtag '{existing_by_slug.name}'"
-                        ))
+                    # Skip if invalid length
+                    if len(tag_name) < 2 or len(tag_name) > 100:
+                        continue
+                    
+                    # For slug, use the name itself for Arabic, slugify for English
+                    # This ensures Arabic hashtags keep their Arabic slug
+                    if any('\u0600' <= c <= '\u06FF' for c in tag_name):
+                        # Arabic hashtag - use name as slug but make it unique if needed
+                        base_slug = tag_name
+                        tag_slug = base_slug
+                        counter = 1
+                        
+                        # Check for existing slugs and make unique if needed
+                        while HashTag.objects.filter(slug=tag_slug).exclude(name=tag_name).exists():
+                            tag_slug = f"{base_slug}-{counter}"
+                            counter += 1
                     else:
-                        # Create new hashtag
+                        # English hashtag - slugify it
+                        base_slug = slugify(tag_name) or tag_name
+                        tag_slug = base_slug
+                        counter = 1
+                        
+                        # Check for existing slugs and make unique if needed
+                        while HashTag.objects.filter(slug=tag_slug).exclude(name=tag_name).exists():
+                            tag_slug = f"{base_slug}-{counter}"
+                            counter += 1
+                    
+                    # First try to get by name (exact match)
+                    hashtag = HashTag.objects.filter(name=tag_name).first()
+                    
+                    if not hashtag:
+                        # Create new hashtag with unique slug
                         hashtag = HashTag.objects.create(
                             name=tag_name,  # Store WITHOUT # sign
                             slug=tag_slug,
@@ -269,14 +315,23 @@ class Command(BaseCommand):
                             is_active=True,
                             order=0
                         )
-                        self.stdout.write(self.style.SUCCESS(f"✓ Created new hashtag: {tag_name}"))
-                else:
-                    self.stdout.write(f"  Using existing hashtag: {tag_name}")
-                
-                hashtags.append(hashtag)
+                        self.stdout.write(self.style.SUCCESS(f"✓ Created new hashtag: {tag_name} (slug: {tag_slug})"))
+                    else:
+                        self.stdout.write(f"  Using existing hashtag: {tag_name}")
+                    
+                    hashtags.append(hashtag)
                     
             except Exception as e:
-                self.stdout.write(self.style.ERROR(f"Error with hashtag '{tag_name}': {str(e)}"))
+                # Try to get existing hashtag if creation failed
+                try:
+                    existing = HashTag.objects.filter(name=tag_name).first()
+                    if existing:
+                        hashtags.append(existing)
+                        self.stdout.write(f"  Using existing hashtag after error: {tag_name}")
+                    else:
+                        self.stdout.write(self.style.ERROR(f"Error with hashtag '{tag_name}': {str(e)}"))
+                except:
+                    self.stdout.write(self.style.ERROR(f"Could not recover hashtag '{tag_name}': {str(e)}"))
         
         return hashtags
     
@@ -405,23 +460,19 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f'Error getting author user: {str(e)}'))
             return None
 
-    def process_batch(self, batch_df, related_objects, author, start_index):
-        """Process a batch of posts"""
+    def process_batch_with_hashtags(self, batch_df, related_objects, author, start_index, hashtag_cache):
+        """Process a batch of posts with pre-created hashtags"""
         posts_to_create = []
         posts_data = []  # Store additional data for M2M relations and attachments
         errors = []
-        
-        # First, collect all unique hashtag names from this batch
-        all_hashtag_names = set()
         
         for idx, row in batch_df.iterrows():
             try:
                 # Prepare post data
                 post_data = self.prepare_post_data(row, related_objects, author, start_index + idx)
                 if post_data:
-                    # Collect hashtag names
+                    # Get hashtag names from post data
                     hashtag_names = post_data.get('hashtag_names', [])
-                    all_hashtag_names.update(hashtag_names)
                     
                     # Separate core fields from M2M and attachment data
                     core_fields = {k: v for k, v in post_data.items() 
@@ -447,24 +498,6 @@ class Command(BaseCommand):
                     
             except Exception as e:
                 errors.append(f'Row {start_index + idx + 1}: {str(e)}')  # +1 for human-readable row number
-        
-        # Pre-create all hashtags outside the transaction
-        hashtag_cache = {}
-        if all_hashtag_names:
-            unique_names = list(all_hashtag_names)
-            self.stdout.write(f"\nPre-creating/fetching {len(unique_names)} unique hashtag(s) for this batch...")
-            hashtag_objects = self.get_or_create_hashtags(unique_names)
-            
-            # Create a mapping from name to object
-            # Important: hashtag names are stored WITHOUT # sign
-            for hashtag in hashtag_objects:
-                # Store with the clean name (no # sign)
-                clean_name = hashtag.name
-                hashtag_cache[clean_name] = hashtag
-                # Also store with # for matching if needed
-                hashtag_cache[f"#{clean_name}"] = hashtag
-            
-            self.stdout.write(f"Successfully cached {len(hashtag_cache)} hashtag mappings")
         
         # Bulk create posts
         created_posts = []
@@ -893,6 +926,10 @@ class Command(BaseCommand):
                 
                 # Determine file type from file name
                 file_type = mimetypes.guess_type(file_name)[0] or 'application/octet-stream'
+                
+                # Truncate file_type to 255 characters (model field limit)
+                if len(file_type) > 255:
+                    file_type = file_type[:255]
                 
                 # Generate a title from file name
                 title_base = file_name.rsplit('.', 1)[0]  # Remove extension
