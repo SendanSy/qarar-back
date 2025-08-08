@@ -44,6 +44,11 @@ class Command(BaseCommand):
             help='Delete only orphaned hashtags (hashtags with no posts)'
         )
         parser.add_argument(
+            '--vacuum-hashtags',
+            action='store_true',
+            help='Vacuum and reindex hashtag table to fix potential issues'
+        )
+        parser.add_argument(
             '--dry-run',
             action='store_true',
             help='Run without actually creating posts (for testing)'
@@ -67,6 +72,10 @@ class Command(BaseCommand):
         
         if options.get('clean_orphaned_hashtags'):
             self.clean_orphaned_hashtags()
+            return
+        
+        if options.get('vacuum_hashtags'):
+            self.vacuum_hashtags()
             return
         
         if options.get('clean'):
@@ -307,15 +316,36 @@ class Command(BaseCommand):
                     hashtag = HashTag.objects.filter(name=tag_name).first()
                     
                     if not hashtag:
-                        # Create new hashtag with unique slug
-                        hashtag = HashTag.objects.create(
-                            name=tag_name,  # Store WITHOUT # sign
-                            slug=tag_slug,
-                            description=f'Hashtag for {tag_name}',
-                            is_active=True,
-                            order=0
-                        )
-                        self.stdout.write(self.style.SUCCESS(f"✓ Created new hashtag: {tag_name} (slug: {tag_slug})"))
+                        # Also check by slug before creating
+                        hashtag = HashTag.objects.filter(slug=tag_slug).first()
+                        if hashtag:
+                            self.stdout.write(self.style.WARNING(
+                                f"  Found existing hashtag by slug '{tag_slug}' with name '{hashtag.name}' (requested name: '{tag_name}')"
+                            ))
+                        else:
+                            # Debug: Check what's in the database
+                            similar_slugs = HashTag.objects.filter(slug__icontains=base_slug[:20]).values_list('slug', 'name')
+                            if similar_slugs:
+                                self.stdout.write(self.style.WARNING(f"  Similar existing slugs for '{base_slug}': {list(similar_slugs[:5])}"))
+                            
+                            # Create new hashtag with unique slug
+                            try:
+                                hashtag = HashTag.objects.create(
+                                    name=tag_name,  # Store WITHOUT # sign
+                                    slug=tag_slug,
+                                    description=f'Hashtag for {tag_name}',
+                                    is_active=True,
+                                    order=0
+                                )
+                                self.stdout.write(self.style.SUCCESS(f"✓ Created new hashtag: {tag_name} (slug: {tag_slug})"))
+                            except Exception as create_error:
+                                # If creation fails, try to find it again (race condition)
+                                self.stdout.write(self.style.ERROR(f"  Creation failed for '{tag_name}': {create_error}"))
+                                hashtag = HashTag.objects.filter(name=tag_name).first() or HashTag.objects.filter(slug=tag_slug).first()
+                                if hashtag:
+                                    self.stdout.write(f"  Found after retry: {hashtag.name} (slug: {hashtag.slug})")
+                                else:
+                                    raise create_error
                     else:
                         self.stdout.write(f"  Using existing hashtag: {tag_name}")
                     
@@ -324,16 +354,63 @@ class Command(BaseCommand):
             except Exception as e:
                 # Try to get existing hashtag if creation failed
                 try:
-                    existing = HashTag.objects.filter(name=tag_name).first()
+                    # Try multiple ways to find the hashtag
+                    existing = (
+                        HashTag.objects.filter(name=tag_name).first() or
+                        HashTag.objects.filter(slug=tag_slug).first() or
+                        HashTag.objects.filter(slug=base_slug).first()
+                    )
                     if existing:
                         hashtags.append(existing)
-                        self.stdout.write(f"  Using existing hashtag after error: {tag_name}")
+                        self.stdout.write(f"  Using existing hashtag after error: {existing.name} (slug: {existing.slug})")
                     else:
+                        # Log detailed error information
                         self.stdout.write(self.style.ERROR(f"Error with hashtag '{tag_name}': {str(e)}"))
-                except:
-                    self.stdout.write(self.style.ERROR(f"Could not recover hashtag '{tag_name}': {str(e)}"))
+                        # Check if it's a slug conflict
+                        if 'duplicate key value' in str(e) and 'slug' in str(e):
+                            conflict = HashTag.objects.filter(slug=tag_slug).first()
+                            if conflict:
+                                self.stdout.write(self.style.ERROR(
+                                    f"  CONFLICT: Slug '{tag_slug}' already exists with name '{conflict.name}' (id: {conflict.id})"
+                                ))
+                except Exception as recovery_error:
+                    self.stdout.write(self.style.ERROR(f"Could not recover hashtag '{tag_name}': {str(e)} | Recovery error: {str(recovery_error)}"))
         
         return hashtags
+    
+    def vacuum_hashtags(self):
+        """Vacuum and reindex hashtag table to fix potential database issues"""
+        try:
+            from django.db import connection
+            with connection.cursor() as cursor:
+                self.stdout.write(self.style.NOTICE('Vacuuming hashtag table...'))
+                
+                # VACUUM ANALYZE to reclaim space and update statistics
+                cursor.execute("VACUUM ANALYZE content_hashtag")
+                self.stdout.write(self.style.SUCCESS('✓ Vacuum completed'))
+                
+                # Try to REINDEX the unique constraint
+                try:
+                    cursor.execute("REINDEX INDEX content_hashtag_slug_key")
+                    self.stdout.write(self.style.SUCCESS('✓ Slug index reindexed'))
+                except Exception as e:
+                    self.stdout.write(self.style.WARNING(f'Could not reindex: {e}'))
+                
+                # Get table statistics
+                cursor.execute("""
+                    SELECT 
+                        pg_stat_get_live_tuples('content_hashtag'::regclass) as live,
+                        pg_stat_get_dead_tuples('content_hashtag'::regclass) as dead
+                """)
+                stats = cursor.fetchone()
+                
+                self.stdout.write(f'\nTable statistics after vacuum:')
+                self.stdout.write(f'  Live rows: {stats[0]}')
+                self.stdout.write(f'  Dead rows: {stats[1]}')
+                
+                self.stdout.write(self.style.SUCCESS('\nVacuum and reindex completed successfully'))
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f'Error during vacuum: {str(e)}'))
     
     def clean_orphaned_hashtags(self):
         """Delete only orphaned hashtags (hashtags with no posts)"""
