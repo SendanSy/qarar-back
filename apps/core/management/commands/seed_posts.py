@@ -114,10 +114,13 @@ class Command(BaseCommand):
                             author,
                             batch_start
                         )
-                        created_posts += posts_created
                         
+                        # CRITICAL: If there are ANY errors, raise exception to rollback the entire batch
                         if errors:
-                            failed_posts.extend(errors)
+                            error_msg = f"Batch {batch_start//batch_size + 1} had {len(errors)} error(s). First error: {errors[0]}"
+                            raise Exception(error_msg)
+                        
+                        created_posts += posts_created
                         
                         self.stdout.write(
                             f'Batch {batch_start//batch_size + 1}: '
@@ -125,10 +128,18 @@ class Command(BaseCommand):
                         )
                         
                 except Exception as e:
+                    # Transaction will be rolled back automatically
                     self.stdout.write(
-                        self.style.ERROR(f'Failed to process batch {batch_start//batch_size + 1}: {str(e)}')
+                        self.style.ERROR(f'\nFATAL ERROR in batch {batch_start//batch_size + 1} (rows {batch_start+1}-{batch_end}):')
                     )
-                    failed_posts.append(f'Batch {batch_start}-{batch_end}: {str(e)}')
+                    self.stdout.write(self.style.ERROR(f'  {str(e)}'))
+                    self.stdout.write(self.style.ERROR(f'\nAll changes for this batch have been rolled back.'))
+                    self.stdout.write(self.style.ERROR(f'Please fix the error and re-run the seeder.'))
+                    
+                    # Stop processing further batches
+                    self.stdout.write(self.style.ERROR(f'\nStopping at batch {batch_start//batch_size + 1}. '
+                                                      f'Successfully created {created_posts} posts before error.'))
+                    return  # Exit completely on error
             
             # Report results
             self.stdout.write(self.style.SUCCESS(f'\nSeeding completed!'))
@@ -432,10 +443,10 @@ class Command(BaseCommand):
                     if attachment_urls:
                         self.stdout.write(f"Row {start_index + idx}: Prepared {len(attachment_urls)} attachment URL(s) for later processing")
                 else:
-                    errors.append(f'Row {start_index + idx}: Could not prepare post data')
+                    errors.append(f'Row {start_index + idx + 1}: Could not prepare post data')  # +1 for human-readable
                     
             except Exception as e:
-                errors.append(f'Row {start_index + idx}: {str(e)}')
+                errors.append(f'Row {start_index + idx + 1}: {str(e)}')  # +1 for human-readable row number
         
         # Pre-create all hashtags outside the transaction
         hashtag_cache = {}
@@ -510,8 +521,8 @@ class Command(BaseCommand):
                         self.stdout.write(f"No attachments found for post {post.id}")
                         
                 except Exception as e:
-                    self.stdout.write(self.style.ERROR(f"Error processing post {post.id} relations: {str(e)}"))
-                    # Continue with next post instead of failing the whole batch
+                    # Re-raise the exception to trigger transaction rollback
+                    raise Exception(f"Error processing post {post.id} relations: {str(e)}")
         
         return len(created_posts), attachments_count, errors
 
@@ -891,21 +902,32 @@ class Command(BaseCommand):
                 if len(title) > 200:
                     title = title[:197] + '...'  # 197 chars + '...' = 200
                 
-                # IMPORTANT: We need to create the attachment carefully to avoid file system access
-                # First, create the object with all fields EXCEPT the file
-                attachment = PostAttachment.objects.create(
+                # IMPORTANT: Check S3 key length before attempting to save
+                if len(s3_key) > 500:
+                    raise ValueError(f"S3 key too long ({len(s3_key)} chars): {s3_key[:100]}...")
+                
+                # IMPORTANT: Create attachment WITHOUT triggering save() method
+                # Use direct SQL update to bypass model save() method completely
+                from django.db import connection
+                
+                # First create with empty file to get an ID
+                attachment = PostAttachment(
                     post=post,
                     title=title if title else f"Attachment {idx+1}",
                     file_type=file_type,
                     order=idx,
                     is_public=True,
-                    size=0,  # Set to 0 since we can't get S3 file size without downloading
-                    file=''  # Create with empty file first
+                    size=0,
+                    file=''  # Empty initially
                 )
+                attachment.save(force_insert=True)
                 
-                # Now update ONLY the file field with the S3 key
-                # This bypasses the save() method that tries to access file.size
-                PostAttachment.objects.filter(id=attachment.id).update(file=s3_key)
+                # Now update ONLY the file field using raw SQL to completely bypass Django's FileField handling
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE content_postattachment SET file = %s WHERE id = %s",
+                        [s3_key, attachment.id]
+                    )
                 
                 attachments.append(attachment)
                 self.stdout.write(
@@ -914,13 +936,13 @@ class Command(BaseCommand):
                 self.stdout.write(f"  S3 Key: {s3_key}")
                 
             except Exception as e:
-                self.stdout.write(
-                    self.style.ERROR(f"✗ Failed to create attachment #{idx+1} for post {post.id}")
-                )
-                self.stdout.write(f"  Error: {str(e)}")
-                self.stdout.write(f"  URL: {url}")
+                # Re-raise with more context to trigger rollback
                 import traceback
+                error_msg = (f"Failed to create attachment #{idx+1} for post {post.id}. "
+                           f"URL: {url}. Error: {str(e)}")
+                self.stdout.write(self.style.ERROR(f"✗ {error_msg}"))
                 self.stdout.write(f"  Traceback: {traceback.format_exc()}")
+                raise Exception(error_msg)
         
         if attachments:
             self.stdout.write(
