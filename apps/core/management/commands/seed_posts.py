@@ -884,13 +884,18 @@ class Command(BaseCommand):
                 file_type = mimetypes.guess_type(file_name)[0] or 'application/octet-stream'
                 
                 # Generate a title from file name
-                title = file_name.replace('_', ' ').replace('-', ' ').rsplit('.', 1)[0]
+                title_base = file_name.rsplit('.', 1)[0]  # Remove extension
+                title = title_base.replace('_', ' ').replace('-', ' ')
+                
+                # Truncate title to 200 characters (model field limit)
+                if len(title) > 200:
+                    title = title[:197] + '...'  # 197 chars + '...' = 200
                 
                 # IMPORTANT: We need to create the attachment carefully to avoid file system access
                 # First, create the object with all fields EXCEPT the file
                 attachment = PostAttachment.objects.create(
                     post=post,
-                    title=title[:255] if title else f"Attachment {idx+1}",
+                    title=title if title else f"Attachment {idx+1}",
                     file_type=file_type,
                     order=idx,
                     is_public=True,

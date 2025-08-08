@@ -329,10 +329,11 @@ class PostAttachment(BaseModel):
     )
     file = models.FileField(
         upload_to='post_attachments/%Y/%m/%d/',
+        max_length=500,
         verbose_name=_('File')
     )
     title = models.CharField(
-        max_length=255,
+        max_length=200,
         blank=True,
         verbose_name=_('Title')
     )
