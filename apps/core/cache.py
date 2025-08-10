@@ -326,39 +326,40 @@ class CategoryCacheManager:
         return tree
 
 
-# Cache invalidation signals
-from django.db.models.signals import post_save, post_delete
-from django.dispatch import receiver
+# Cache invalidation signals - TEMPORARILY DISABLED
+# from django.db.models.signals import post_save, post_delete
+# from django.dispatch import receiver
 
 
-@receiver([post_save, post_delete])
-def invalidate_model_cache(sender, instance, **kwargs):
-    """
-    Signal handler to invalidate cache when models are modified.
-    """
-    # Only handle our app models
-    if not instance._meta.app_label.startswith('apps.'):
-        return
-    
-    try:
-        # Invalidate specific model cache
-        CacheManager.invalidate_model(instance)
-        
-        # Special handling for post-related models
-        if hasattr(instance, 'post'):
-            PostCacheManager.invalidate_post(instance.post.id)
-        
-        # Special handling for category-related models
-        if instance.__class__.__name__ in ['Category', 'SubCategory']:
-            CategoryCacheManager.invalidate_category(instance.id)
-            CacheManager.delete_pattern("category_tree*")
-        
-        # Special handling for posts
-        if instance.__class__.__name__ == 'Post':
-            PostCacheManager.invalidate_post(instance.id)
-        
-    except Exception as e:
-        pass
+# @receiver([post_save, post_delete])
+# def invalidate_model_cache(sender, instance, **kwargs):
+#     """
+#     Signal handler to invalidate cache when models are modified.
+#     TEMPORARILY DISABLED - Caching is disabled for current phase
+#     """
+#     # Only handle our app models
+#     if not instance._meta.app_label.startswith('apps.'):
+#         return
+#     
+#     try:
+#         # Invalidate specific model cache
+#         CacheManager.invalidate_model(instance)
+#         
+#         # Special handling for post-related models
+#         if hasattr(instance, 'post'):
+#             PostCacheManager.invalidate_post(instance.post.id)
+#         
+#         # Special handling for category-related models
+#         if instance.__class__.__name__ in ['Category', 'SubCategory']:
+#             CategoryCacheManager.invalidate_category(instance.id)
+#             CacheManager.delete_pattern("category_tree*")
+#         
+#         # Special handling for posts
+#         if instance.__class__.__name__ == 'Post':
+#             PostCacheManager.invalidate_post(instance.id)
+#         
+#     except Exception as e:
+#         pass
 
 # Utility functions for common caching patterns
 def cached_queryset(queryset, cache_key: str, timeout: Union[int, str] = 'medium'):

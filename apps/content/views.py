@@ -6,8 +6,9 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from django.utils.decorators import method_decorator
-from django.views.decorators.cache import cache_page
-from django.core.cache import cache
+# Caching temporarily disabled
+# from django.views.decorators.cache import cache_page
+# from django.core.cache import cache
 from django.db.models import Q, Prefetch, F
 from django.utils import timezone
 
@@ -69,15 +70,7 @@ class PostViewSet(viewsets.ModelViewSet):
         return [permission() for permission in permission_classes]
     
     def list(self, request):
-        """List posts with caching and performance monitoring."""
-        # Generate cache key based on filters and pagination
-        cache_key = f"post_list_{hash(str(request.GET.dict()))}_{request.GET.get('page', 1)}"
-        
-        # Try to get from cache
-        cached_response = cache.get(cache_key)
-        if cached_response:
-            return Response(cached_response)
-        
+        """List posts with performance monitoring (caching temporarily disabled)."""
         # Get queryset with user context
         queryset = self.filter_queryset(self.get_queryset())
         
@@ -93,20 +86,10 @@ class PostViewSet(viewsets.ModelViewSet):
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
-            response_data = self.get_paginated_response(serializer.data).data
-            
-            # Cache the response for 5 minutes
-            cache.set(cache_key, response_data, 300)
-            
-            return Response(response_data)
+            return self.get_paginated_response(serializer.data)
         
         serializer = self.get_serializer(queryset, many=True)
-        response_data = serializer.data
-        
-        # Cache the response
-        cache.set(cache_key, response_data, 300)
-        
-        return Response(response_data)
+        return Response(serializer.data)
     
     def retrieve(self, request, slug=None):
         """Retrieve post with view tracking and real-time bookmark status."""
@@ -131,13 +114,10 @@ class PostViewSet(viewsets.ModelViewSet):
             author=self.request.user,
             published_at=timezone.now() if serializer.validated_data.get('status') == 'published' else None
         )
-        
-        # Invalidate related caches
-        cache.delete_many([f"post_list_{i}" for i in range(10)])  # Simple cache invalidation
-        
+        # Caching disabled - no cache invalidation needed
     
     def perform_update(self, serializer):
-        """Update post with cache invalidation."""
+        """Update post."""
         old_status = self.get_object().status
         new_status = serializer.validated_data.get('status', old_status)
         
@@ -146,9 +126,7 @@ class PostViewSet(viewsets.ModelViewSet):
             serializer.save(published_at=timezone.now())
         else:
             serializer.save()
-        
-        # Invalidate list caches only (post detail is not cached)
-        cache.delete_many([f"post_list_{i}" for i in range(10)])
+        # Caching disabled - no cache invalidation needed
     
     @action(detail=True, methods=['post'])
     def publish(self, request, slug=None):
@@ -161,10 +139,7 @@ class PostViewSet(viewsets.ModelViewSet):
             post.status = 'published'
             post.published_at = timezone.now()
             post.save()
-            
-            # Invalidate list caches only (post detail is not cached)
-            cache.delete_many([f"post_list_{i}" for i in range(10)])
-            
+            # Caching disabled - no cache invalidation needed
             
             serializer = self.get_serializer(post)
             return Response(serializer.data)
@@ -222,35 +197,17 @@ class PostViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'])
     def featured(self, request):
-        """Get featured posts with caching."""
-        cache_key = "featured_posts"
-        cached_posts = cache.get(cache_key)
-        
-        if cached_posts:
-            return Response(cached_posts)
-        
+        """Get featured posts (caching temporarily disabled)."""
         queryset = self.get_queryset()[:10]
         serializer = self.get_serializer(queryset, many=True)
-        response_data = serializer.data
-        
-        cache.set(cache_key, response_data, 1800)  # 30 minutes
-        return Response(response_data)
+        return Response(serializer.data)
     
     @action(detail=False, methods=['get'])
     def trending(self, request):
-        """Get trending posts."""
-        cache_key = "trending_posts"
-        cached_posts = cache.get(cache_key)
-        
-        if cached_posts:
-            return Response(cached_posts)
-        
+        """Get trending posts (caching temporarily disabled)."""
         queryset = self.get_queryset().order_by('-view_count')[:10]
         serializer = self.get_serializer(queryset, many=True)
-        response_data = serializer.data
-        
-        cache.set(cache_key, response_data, 900)  # 15 minutes
-        return Response(response_data)
+        return Response(serializer.data)
     
 
 
@@ -328,35 +285,17 @@ class HashTagViewSet(viewsets.ReadOnlyModelViewSet):
     
     @action(detail=False, methods=['get'])
     def trending(self, request):
-        """Get trending hashtags."""
-        cache_key = "trending_hashtags"
-        cached_tags = cache.get(cache_key)
-        
-        if cached_tags:
-            return Response(cached_tags)
-        
+        """Get trending hashtags (caching temporarily disabled)."""
         hashtags = self.get_queryset()[:20]
         serializer = self.get_serializer(hashtags, many=True)
-        response_data = serializer.data
-        
-        cache.set(cache_key, response_data, 900)  # 15 minutes
-        return Response(response_data)
+        return Response(serializer.data)
     
     @action(detail=False, methods=['get'])
     def popular(self, request):
-        """Get popular hashtags."""
-        cache_key = "popular_hashtags"
-        cached_tags = cache.get(cache_key)
-        
-        if cached_tags:
-            return Response(cached_tags)
-        
+        """Get popular hashtags (caching temporarily disabled)."""
         hashtags = self.get_queryset()[:30]
         serializer = self.get_serializer(hashtags, many=True)
-        response_data = serializer.data
-        
-        cache.set(cache_key, response_data, 1800)  # 30 minutes
-        return Response(response_data)
+        return Response(serializer.data)
     
     @action(detail=True, methods=['get'])
     def posts(self, request, slug=None):

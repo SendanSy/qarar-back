@@ -12,7 +12,8 @@ from django.utils import timezone
 from typing import Dict, List, Any, Optional, Tuple
 import re
 
-from apps.core.cache import CacheManager, cache_result
+# Caching temporarily disabled
+# from apps.core.cache import CacheManager, cache_result
 from apps.core.services import BaseService
 
 
@@ -104,11 +105,11 @@ class PostSearchService(BaseService):
         # Parse and clean query
         cleaned_query, terms = SearchManager.parse_search_query(query)
         
-        # Check cache
-        cache_key = f"search_{hash(query)}_{hash(str(filters))}_{page}_{per_page}"
-        cached_result = CacheManager.get(cache_key)
-        if cached_result:
-            return cached_result
+        # Caching temporarily disabled
+        # cache_key = f"search_{hash(query)}_{hash(str(filters))}_{page}_{per_page}"
+        # cached_result = CacheManager.get(cache_key)
+        # if cached_result:
+        #     return cached_result
         
         # Build base queryset
         queryset = self._get_search_queryset(filters)
@@ -121,8 +122,8 @@ class PostSearchService(BaseService):
         # Add analytics
         self._track_search(query, search_result['total_results'])
         
-        # Cache result
-        CacheManager.set(cache_key, search_result, 'short')
+        # Caching temporarily disabled
+        # CacheManager.set(cache_key, search_result, 'short')
         
         return search_result
     
@@ -342,10 +343,12 @@ class PostSearchService(BaseService):
     
     def get_popular_searches(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Get popular search queries."""
-        cache_key = f"popular_searches_{limit}"
-        popular = CacheManager.get(cache_key)
+        # Caching temporarily disabled
+        # cache_key = f"popular_searches_{limit}"
+        # popular = CacheManager.get(cache_key)
+        popular = None
         
-        if popular is None:
+        if True:  # Always fetch fresh data
             try:
                 from apps.content.models.analytics import SearchAnalytics
                 
@@ -360,7 +363,8 @@ class PostSearchService(BaseService):
                     .order_by('-search_count')[:limit]
                 )
                 
-                CacheManager.set(cache_key, popular, 'long')
+                # Caching temporarily disabled
+                # CacheManager.set(cache_key, popular, 'long')
             except ImportError:
                 popular = []
         
@@ -371,10 +375,12 @@ class PostSearchService(BaseService):
         if len(query) < 2:
             return []
         
-        cache_key = f"autocomplete_{query}_{limit}"
-        suggestions = CacheManager.get(cache_key)
+        # Caching temporarily disabled
+        # cache_key = f"autocomplete_{query}_{limit}"
+        # suggestions = CacheManager.get(cache_key)
+        suggestions = None
         
-        if suggestions is None:
+        if True:  # Always fetch fresh data
             # Get suggestions from post titles
             title_suggestions = self.model.objects.published().filter(
                 Q(title__icontains=query) | Q(title_ar__icontains=query)
@@ -390,7 +396,8 @@ class PostSearchService(BaseService):
             # Remove duplicates and limit
             suggestions = list(set(suggestions))[:limit]
             
-            CacheManager.set(cache_key, suggestions, 'medium')
+            # Caching temporarily disabled
+            # CacheManager.set(cache_key, suggestions, 'medium')
         
         return suggestions
 
@@ -410,10 +417,12 @@ class CategorySearchService(BaseService):
         if not query or len(query.strip()) < 2:
             return []
         
-        cache_key = f"category_search_{query}_{limit}"
-        results = CacheManager.get(cache_key)
+        # Caching temporarily disabled
+        # cache_key = f"category_search_{query}_{limit}"
+        # results = CacheManager.get(cache_key)
+        results = None
         
-        if results is None:
+        if True:  # Always fetch fresh data
             queryset = self.model.objects.filter(
                 is_deleted=False,
                 is_active=True
@@ -429,7 +438,8 @@ class CategorySearchService(BaseService):
             ).order_by('-similarity', 'name')
             
             results = list(queryset[:limit])
-            CacheManager.set(cache_key, results, 'medium')
+            # Caching temporarily disabled
+            # CacheManager.set(cache_key, results, 'medium')
         
         return results
 
@@ -452,10 +462,12 @@ class HashTagSearchService(BaseService):
         # Remove # if present
         clean_query = query.lstrip('#')
         
-        cache_key = f"hashtag_search_{clean_query}_{limit}"
-        results = CacheManager.get(cache_key)
+        # Caching temporarily disabled
+        # cache_key = f"hashtag_search_{clean_query}_{limit}"
+        # results = CacheManager.get(cache_key)
+        results = None
         
-        if results is None:
+        if True:  # Always fetch fresh data
             results = list(
                 self.model.objects.filter(
                     is_deleted=False,
@@ -463,7 +475,8 @@ class HashTagSearchService(BaseService):
                     name__icontains=clean_query
                 ).order_by('-post_count', 'name')[:limit]
             )
-            CacheManager.set(cache_key, results, 'medium')
+            # Caching temporarily disabled
+            # CacheManager.set(cache_key, results, 'medium')
         
         return results
 
